@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node test_good_setting.js)",
+      "Bash(curl -s -o /dev/null -w \"3000: %{http_code}\\\\n\" localhost:3000)",
+      "Bash(curl -s -o /dev/null -w \"3001: %{http_code}\\\\n\" localhost:3001)",
+      "Bash(curl -s -o /dev/null -w \"3002: %{http_code}\\\\n\" localhost:3002)",
+      "Bash(curl -s -o /dev/null -w \"3003: %{http_code}\\\\n\" localhost:3003)",
+      "Bash(node scripts/sync-to-sheets.js --dry-run)",
+      "Bash(tasklist)",
+      "Bash(\"/c/Users/HP/AppData/Roaming/npm/node_modules/ngrok/bin/ngrok.exe\" http *)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" \"https://paleoclimatological-dimple-unvolatilized.ngrok-free.dev/\" -H \"ngrok-skip-browser-warning: true\")",
+      "Bash(node -e ' *)",
+      "Bash(taskkill //PID 17724 //F)",
+      "Bash(curl -s -X POST http://localhost:3000/api/login -H \"Content-Type: application/json\" -d '{\"email\":\"abhishiek@modesigns.in\",\"password\":\"Abhi99@\"}')",
+      "Bash(curl -sL \"https://script.google.com/macros/s/AKfycbyVVDKB2D89vv5xXXWGcBfFThyyzbpi03kLqaZkX9CKjunxsdyU1aaYQSRkyt8G5l6x/exec\")",
+      "Bash(curl -sL \"https://docs.google.com/spreadsheets/d/1JDrCuhhJpFehxSt3AfIXJJv_w2VbUaunfmvyHxmsN50/export?format=csv&gid=0\")",
+      "Bash(node --check js/bootstrap.js)",
+      "Bash(node --check js/business.js)",
+      "Bash(node -e \"console.log\\(new Date\\(\\).toISOString\\(\\)\\)\")",
+      "PowerShell(Stop-Process -Id 28744 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"ProcessId=28744\" -ErrorAction SilentlyContinue)"
+    ]
+  }
+}

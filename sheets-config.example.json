@@ -1,0 +1,4 @@
+{
+  "spreadsheetId": "PASTE_YOUR_SPREADSHEET_ID_HERE",
+  "serviceAccountKeyPath": "./service-account-key.json"
+}

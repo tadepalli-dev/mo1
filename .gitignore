@@ -1,0 +1,14 @@
+node_modules/
+data/
+sheets-config.json
+checklist-sheet-config.json
+submission-report-source.json
+service-account-key.json
+apps-script/Code.gs
+*.log
+.claude/settings.local.json
+.vercel
+
+.vercel
+.env*
+.vercel.bak

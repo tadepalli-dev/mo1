@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MoTrack User Management</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <section class="auth-layout" id="authView">
+        <div class="login-card">
+          <div class="section-heading">
+            <div>
+              <p class="section-label">MoTrack</p>
+              <h2>Sign in</h2>
+            </div>
+          </div>
+
+          <p class="login-copy">
+            Enter your email and password to open the user management dashboard.
+          </p>
+
+          <form id="loginForm" class="login-form">
+            <label>
+              Work email
+              <input
+                type="email"
+                id="emailInput"
+                name="email"
+                placeholder="name@company.com"
+                autocomplete="email"
+                required
+              />
+            </label>
+
+            <label>
+              Password
+              <input
+                type="password"
+                id="passwordInput"
+                name="password"
+                placeholder="Enter your password"
+                autocomplete="current-password"
+                required
+              />
+            </label>
+
+            <div class="login-row">
+              <label class="checkbox-row">
+                <input type="checkbox" id="rememberMe" />
+                <span>Remember this email</span>
+              </label>
+              <button type="button" id="useDemoUser" class="text-button">
+                Use demo user
+              </button>
+            </div>
+
+            <button type="submit" class="button button--primary">
+              Sign in
+            </button>
+          </form>
+
+          <p id="loginMessage" class="message" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section class="dashboard-shell hidden" id="dashboardView">
+        <aside class="sidebar">
+          <div class="sidebar-brand">
+            <div class="sidebar-brand__mark">
+              <div class="sidebar-logo">M</div>
+            </div>
+            <div class="sidebar-brand__copy">
+              <p class="eyebrow">MoTrack</p>
+              <strong>Workspace</strong>
+              <span class="sidebar-subtitle">Micro dashboard for user access and checklist tracking</span>
+            </div>
+            <button
+              type="button"
+              id="sidebarClose"
+              class="sidebar-close"
+              aria-label="Close sidebar"
+            >
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z"></path>
+              </svg>
+            </button>
+          </div>
+
+          <nav class="sidebar-nav" aria-label="Main navigation">
+            <button type="button" class="sidebar-link is-active" data-view="home">
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M3 10.5 12 3l9 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-4.25v-6h-6.5v6H4.5A1.5 1.5 0 0 1 3 19.5z"></path>
+                </svg>
+              </span>
+              <span>Home</span>
+            </button>
+            <button type="button" class="sidebar-link" data-view="users">
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M7 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm10 0a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM7 13c2.76 0 5 2.02 5 4.5V20H2v-2.5C2 15.02 4.24 13 7 13Zm10 0c2.76 0 5 2.02 5 4.5V20h-6v-2.5c0-1.77-.77-3.38-2.01-4.5z"></path>
+                </svg>
+              </span>
+              <span>User Management</span>
+            </button>
+            <button type="button" class="sidebar-link" data-view="approvals">
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="m9.55 17.6-5.15-5.15 1.4-1.4 3.75 3.75 8.65-8.65 1.4 1.4z"></path>
+                </svg>
+              </span>
+              <span>Approvals</span>
+            </button>
+            <button type="button" class="sidebar-link" data-view="buddy">
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M16 11a4 4 0 1 0-3.46-2H8a4 4 0 1 0 0 2h4.54A4 4 0 1 0 16 11Zm-8 2a2 2 0 1 1 0-4 2 2 0 0 1 0 4Zm8 4a2 2 0 1 1 0-4 2 2 0 0 1 0 4Zm0-10a2 2 0 1 1 0-4 2 2 0 0 1 0 4Z"></path>
+                </svg>
+              </span>
+              <span>Buddy Coverage</span>
+            </button>
+          </nav>
+
+          <div class="sidebar-footer">
+            <div class="session-chip">
+              <span>Signed in as</span>
+              <strong id="activeUserName">User</strong>
+              <small class="session-chip__note">Use the same MoTrack login for dashboard access.</small>
+            </div>
+            <button type="button" id="logoutButton" class="button button--ghost">
+              Log out
+            </button>
+          </div>
+        </aside>
+
+        <main class="dashboard-main">
+          <div class="dashboard-topbar">
+            <button
+              type="button"
+              id="sidebarToggle"
+              class="sidebar-toggle"
+              aria-label="Toggle sidebar"
+            >
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path>
+              </svg>
+            </button>
+            <div class="dashboard-topbar__copy">
+              <p class="eyebrow">MoTrack</p>
+              <strong>Dashboard</strong>
+            </div>
+          </div>
+
+          <div id="liveShareBanner" class="live-share-banner hidden"></div>
+
+          <div class="dashboard-scroll">
+          <section id="homePage" class="dashboard-page">
+            <header class="dashboard-header">
+              <div>
+                <p class="eyebrow">Home</p>
+                <h2 id="homeTitle">Dashboard Home</h2>
+                <p id="homeSubtitle" class="dashboard-copy">
+                  Welcome back to your MoTrack workspace.
+                </p>
+              </div>
+            </header>
+
+            <div id="buddyCoverageBanner" class="buddy-coverage-banner hidden"></div>
+
+            <section id="adminDashboardPanel" class="panel role-dashboard hidden">
+              <div class="section-heading section-heading--wrap">
+                <div>
+                  <p class="section-label">Admin Dashboard</p>
+                  <h2 id="adminWelcome">Welcome back, Asha</h2>
+                </div>
+
+                <div class="admin-toolbar">
+                  <label class="toolbar-field toolbar-field--search">
+                    <span>Search task board</span>
+                    <input
+                      type="search"
+                      id="homeSearchInput"
+                      placeholder="Search by task, employee, task ID"
+                    />
+                  </label>
+
+                  <label class="toolbar-field">
+                    <span>Date</span>
+                    <input type="date" id="dashboardDateInput" />
+                  </label>
+
+                  <button
+                    type="button"
+                    id="openAssignTaskButton"
+                    data-open-assign-modal="true"
+                    class="button button--primary"
+                  >
+                    Assign task
+                  </button>
+                </div>
+              </div>
+
+              <div class="board-heading">
+                <div>
+                  <p class="section-label">Task Board</p>
+                  <h3>Assigned by you</h3>
+                </div>
+                <p id="adminBoardMeta" class="board-meta"></p>
+              </div>
+
+              <div id="adminTaskBoard" class="task-board"></div>
+              <div id="adminBoardPagination" class="pagination"></div>
+
+              <div id="pantryAlertsSection" class="pantry-alerts-section hidden">
+                <div class="board-heading">
+                  <div>
+                    <p class="section-label">Pantry Alerts</p>
+                    <h3>Quantity mismatches reported by employees</h3>
+                  </div>
+                  <p id="pantryAlertsMeta" class="board-meta"></p>
+                </div>
+
+                <div id="pantryAlertsBoard" class="task-board"></div>
+              </div>
+            </section>
+
+            <section id="employeeDashboardPanel" class="panel role-dashboard hidden">
+              <div class="employee-table-header">
+                <div>
+                  <p class="section-label">Employee Dashboard</p>
+                  <h2 id="employeeWelcome">Welcome back</h2>
+                </div>
+
+                <div class="employee-table-header__side">
+                  <div class="employee-toolbar">
+                    <label class="toolbar-field">
+                      <span>Select date range</span>
+                      <select id="dateRangeSelect">
+                        <option value="today">Today</option>
+                        <option value="last7">Last 7 days</option>
+                        <option value="last15">Last 15 days</option>
+                        <option value="thisMonth">This month</option>
+                      </select>
+                    </label>
+
+                    <label class="toolbar-field">
+                      <span>Task</span>
+                      <select id="taskSelect">
+                        <option value="all">All tasks</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="every_15_days">Every 15 days</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="every_3_months">Every 3 months</option>
+                        <option value="one_time">One time</option>
+                      </select>
+                    </label>
+
+                    <label class="toolbar-field">
+                      <span>Department</span>
+                      <select id="departmentSelect">
+                        <option value="all">All departments</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <p id="employeeBoardMeta" class="board-meta"></p>
+                </div>
+              </div>
+
+              <div class="board-heading">
+                <div>
+                  <p class="section-label">Today's Walk-ins</p>
+                  <h3>Customers handed over to you</h3>
+                </div>
+                <p id="walkinCustomerMeta" class="board-meta"></p>
+              </div>
+
+              <div id="walkinCustomerBoard" class="task-board"></div>
+
+              <div class="checklist-title">CHECKLIST PENDING TASK</div>
+
+              <div class="employee-task-shell">
+                <div class="employee-task-table-wrap">
+                  <table class="employee-task-table">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Task</th>
+                        <th>Freq</th>
+                        <th>Department</th>
+                        <th>Planned</th>
+                        <th>Task ID</th>
+                        <th>Update status</th>
+                      </tr>
+                    </thead>
+                    <tbody id="employeeTaskTableBody"></tbody>
+                  </table>
+                </div>
+                <div id="employeeTaskPagination" class="pagination"></div>
+              </div>
+
+              <div id="kamalApprovalSection" class="pantry-alerts-section hidden">
+                <div class="board-heading">
+                  <div>
+                    <p class="section-label">Approval Needed</p>
+                    <h3>AC filter cleaning checklists awaiting your approval</h3>
+                  </div>
+                  <p id="kamalApprovalMeta" class="board-meta"></p>
+                </div>
+
+                <div id="kamalApprovalBoard" class="task-board"></div>
+              </div>
+            </section>
+          </section>
+
+          <section id="usersPage" class="dashboard-page hidden">
+            <header class="dashboard-header">
+              <div>
+                <p class="eyebrow">User Management</p>
+                <h2>User Management</h2>
+                <p class="dashboard-copy">
+                  Add, edit, and manage user accounts and permissions.
+                </p>
+              </div>
+            </header>
+
+            <section class="stats-strip" id="userStatsStrip">
+              <article class="stat-card">
+                <span>Total users</span>
+                <strong id="totalUsers">0</strong>
+              </article>
+              <article class="stat-card">
+                <span>Admins</span>
+                <strong id="adminUsers">0</strong>
+              </article>
+              <article class="stat-card">
+                <span>Salesmen</span>
+                <strong id="salesUsers">0</strong>
+              </article>
+              <article class="stat-card">
+                <span>Installers</span>
+                <strong id="installerUsers">0</strong>
+              </article>
+            </section>
+
+            <section class="panel">
+              <div class="section-heading section-heading--wrap">
+                <div>
+                  <p class="section-label">Add User</p>
+                  <h2>Create a new MoTrack user</h2>
+                </div>
+                <button type="button" id="toggleAddUserForm" class="button button--primary">
+                  + Add user
+                </button>
+              </div>
+
+              <form id="addUserForm" class="add-user-form hidden" autocomplete="off">
+                <label class="toolbar-field">
+                  <span>Name</span>
+                  <input
+                    type="text"
+                    id="newUserName"
+                    placeholder="Enter full name"
+                    autocomplete="off"
+                    required
+                  />
+                </label>
+
+                <label class="toolbar-field">
+                  <span>Email</span>
+                  <input
+                    type="email"
+                    id="newUserEmail"
+                    placeholder="name@company.com"
+                    autocomplete="off"
+                    required
+                  />
+                </label>
+
+                <label class="toolbar-field">
+                  <span>Role</span>
+                  <input
+                    type="text"
+                    id="newUserRole"
+                    placeholder="admin, employee, installer"
+                    required
+                  />
+                </label>
+
+                <label class="toolbar-field">
+                  <span>Designation</span>
+                  <input
+                    type="text"
+                    id="newUserDesignation"
+                    placeholder="CRM, Accounts, Manager"
+                  />
+                </label>
+
+                <label class="toolbar-field">
+                  <span>Salesman Code</span>
+                  <input
+                    type="text"
+                    id="newUserCode"
+                    placeholder="Optional code"
+                  />
+                </label>
+
+                <label class="toolbar-field">
+                  <span>Day Off</span>
+                  <select id="newUserDayOff">
+                    <option value="-">No day off</option>
+                    <option value="Sunday">Sunday</option>
+                    <option value="Monday">Monday</option>
+                    <option value="Tuesday">Tuesday</option>
+                    <option value="Wednesday">Wednesday</option>
+                    <option value="Thursday">Thursday</option>
+                    <option value="Friday">Friday</option>
+                    <option value="Saturday">Saturday</option>
+                  </select>
+                </label>
+
+                <label class="toolbar-field">
+                  <span>Password</span>
+                  <input
+                    type="password"
+                    id="newUserPassword"
+                    placeholder="Set login password"
+                    autocomplete="new-password"
+                    required
+                  />
+                </label>
+
+                <div class="add-user-actions">
+                  <button type="submit" class="button button--primary">
+                    Add user
+                  </button>
+                  <p id="addUserMessage" class="message" aria-live="polite"></p>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel" id="userDirectoryPanel">
+              <div class="section-heading section-heading--wrap">
+                <div>
+                  <p class="section-label">Directory</p>
+                  <h2>All users</h2>
+                </div>
+
+                <div class="toolbar">
+                  <label class="toolbar-field toolbar-field--search">
+                    <span>Search</span>
+                    <input
+                      type="search"
+                      id="searchInput"
+                      placeholder="Search by name, email, role"
+                    />
+                  </label>
+
+                  <label class="toolbar-field">
+                    <span>Role</span>
+                    <select id="roleFilter">
+                      <option value="all">All roles</option>
+                    </select>
+                  </label>
+
+                  <label class="toolbar-field">
+                    <span>Day off</span>
+                    <select id="dayOffFilter">
+                      <option value="all">All days</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <div class="table-shell">
+                <table class="user-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Designation</th>
+                      <th>Salesman Code</th>
+                      <th>Day Off</th>
+                    </tr>
+                  </thead>
+                  <tbody id="userTableBody"></tbody>
+                </table>
+              </div>
+
+              <div id="mobileCards" class="mobile-cards"></div>
+              <div id="emptyState" class="empty-state hidden">
+                No users match the current filters.
+              </div>
+              <div id="userTablePagination" class="pagination"></div>
+            </section>
+          </section>
+
+          <section id="approvalsPage" class="dashboard-page hidden">
+            <header class="dashboard-header">
+              <div>
+                <p class="eyebrow">Approvals</p>
+                <h2>Checklist submissions</h2>
+              </div>
+            </header>
+
+            <section class="panel">
+              <div class="section-heading section-heading--wrap">
+                <div>
+                  <p class="section-label">Review</p>
+                  <h2>Submitted checklists</h2>
+                </div>
+
+                <div class="toolbar">
+                  <label class="toolbar-field">
+                    <span>Date</span>
+                    <input type="date" id="approvalsDateInput" />
+                  </label>
+                </div>
+              </div>
+
+              <div class="tab-nav" id="approvalsTabNav" role="tablist">
+                <button type="button" class="tab-button is-active" data-approvals-tab="pending" role="tab">
+                  Pending <span id="approvalsPendingTabCount" class="tab-count"></span>
+                </button>
+                <button type="button" class="tab-button" data-approvals-tab="completed" role="tab">
+                  Completed <span id="approvalsCompletedTabCount" class="tab-count"></span>
+                </button>
+                <button type="button" class="tab-button" data-approvals-tab="approved" role="tab">
+                  Approved <span id="approvalsApprovedTabCount" class="tab-count"></span>
+                </button>
+                <button type="button" class="tab-button" data-approvals-tab="live" role="tab">
+                  Live <span id="approvalsLiveTabCount" class="tab-count"></span>
+                </button>
+              </div>
+
+              <div id="approvalsPendingSection">
+                <div class="board-heading">
+                  <div>
+                    <h3>Not yet submitted</h3>
+                  </div>
+                  <p id="approvalsPendingMeta" class="board-meta"></p>
+                </div>
+
+                <div id="approvalsPendingBoard" class="task-board"></div>
+                <div id="approvalsPendingEmpty" class="empty-state hidden">
+                  Every task for this date has been submitted.
+                </div>
+                <div id="approvalsPendingPagination" class="pagination"></div>
+              </div>
+
+              <div id="approvalsCompletedSection" class="hidden">
+                <div class="board-heading">
+                  <div>
+                    <h3>Awaiting review</h3>
+                  </div>
+                  <p id="approvalsCompletedMeta" class="board-meta"></p>
+                </div>
+
+                <div id="approvalsCompletedBoard" class="task-board"></div>
+                <div id="approvalsCompletedEmpty" class="empty-state hidden">
+                  No completed submissions awaiting review for this date.
+                </div>
+                <div id="approvalsCompletedPagination" class="pagination"></div>
+              </div>
+
+              <div id="approvalsApprovedSection" class="hidden">
+                <div class="board-heading">
+                  <div>
+                    <h3>Reviewed</h3>
+                  </div>
+                  <p id="approvalsApprovedMeta" class="board-meta"></p>
+                </div>
+
+                <div id="approvalsApprovedBoard" class="task-board"></div>
+                <div id="approvalsApprovedEmpty" class="empty-state hidden">
+                  No approved submissions for this date.
+                </div>
+                <div id="approvalsApprovedPagination" class="pagination"></div>
+              </div>
+
+              <div id="approvalsLiveSection" class="hidden">
+                <div class="board-heading">
+                  <div>
+                    <h3>Live locations</h3>
+                  </div>
+                  <p id="approvalsLiveMeta" class="board-meta"></p>
+                </div>
+
+                <div id="liveLocationMap" class="live-location-map"></div>
+                <div id="approvalsLiveEmpty" class="empty-state hidden">
+                  No one is sharing their live location right now.
+                </div>
+                <div id="approvalsLiveList" class="live-location-list"></div>
+              </div>
+            </section>
+          </section>
+
+          <section id="buddyPage" class="dashboard-page hidden">
+            <header class="dashboard-header">
+              <div>
+                <p class="eyebrow">Buddy Coverage</p>
+                <h2>Week Off And Buddy Details</h2>
+                <p class="dashboard-copy">
+                  Buddy coverage keeps work moving when someone is on week off or marked absent.
+                </p>
+              </div>
+            </header>
+
+            <section class="stats-strip buddy-stats">
+              <article class="stat-card">
+                <span>Buddy records</span>
+                <strong id="buddyCount">0</strong>
+              </article>
+              <article class="stat-card">
+                <span>Today week off</span>
+                <strong id="weekOffCount">0</strong>
+              </article>
+              <article class="stat-card">
+                <span>Today absent</span>
+                <strong id="absenceCount">0</strong>
+              </article>
+              <article class="stat-card">
+                <span>Coverage tasks</span>
+                <strong id="coverageTaskCount">0</strong>
+              </article>
+            </section>
+
+            <section class="panel buddy-panel">
+              <div class="section-heading section-heading--wrap">
+                <div>
+                  <p class="section-label">Absence Control</p>
+                  <h2>Route tasks to buddy automatically</h2>
+                </div>
+              </div>
+
+              <form id="absenceForm" class="assign-task-form">
+                <label class="toolbar-field">
+                  <span>Employee</span>
+                  <input
+                    type="search"
+                    id="absenceEmployeeInput"
+                    list="absenceEmployeeList"
+                    placeholder="Type employee name"
+                    autocomplete="off"
+                    required
+                  />
+                  <datalist id="absenceEmployeeList"></datalist>
+                </label>
+
+                <label class="toolbar-field">
+                  <span>Date</span>
+                  <input type="date" id="absenceDateInput" required />
+                </label>
+
+                <label class="toolbar-field">
+                  <span>Reason</span>
+                  <select id="absenceReasonSelect">
+                    <option value="Absent">Absent</option>
+                    <option value="Leave">Leave</option>
+                    <option value="Emergency">Emergency</option>
+                  </select>
+                </label>
+
+                <div class="add-user-actions">
+                  <button type="submit" class="button button--primary">
+                    Mark absent
+                  </button>
+                  <p id="absenceMessage" class="message" aria-live="polite"></p>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="section-heading section-heading--wrap">
+                <div>
+                  <p class="section-label">Today Coverage</p>
+                  <h2>Week off and absence routing</h2>
+                </div>
+              </div>
+              <div id="coverageList" class="coverage-list"></div>
+            </section>
+          </section>
+          </div>
+        </main>
+      </section>
+    </div>
+
+    <div id="assignTaskModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card">
+          <div class="section-heading">
+          <div>
+            <p class="section-label">Assign Task</p>
+            <h2 id="assignTaskModalTitle">Create task for employee dashboard</h2>
+            <p class="dashboard-copy">
+              Repeating tasks start on the planned date and continue for one year unless Asha updates them.
+            </p>
+            </div>
+            <button
+              type="button"
+              id="closeAssignTaskButton"
+            class="sidebar-close modal-close"
+            aria-label="Close assign task form"
+          >
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z"></path>
+            </svg>
+          </button>
+        </div>
+
+        <form id="assignTaskForm" class="assign-task-form">
+          <label class="toolbar-field">
+            <span>Name</span>
+            <input
+              type="search"
+              id="assignTaskUser"
+              list="assignTaskUserList"
+              placeholder="Type employee name or email"
+              autocomplete="off"
+              required
+            />
+            <datalist id="assignTaskUserList"></datalist>
+          </label>
+
+          <label class="toolbar-field">
+            <span>Task</span>
+            <input
+              type="text"
+              id="assignTaskTitle"
+              placeholder="Enter task name"
+              required
+            />
+          </label>
+
+          <label class="toolbar-field">
+            <span>Frequency</span>
+            <select id="assignTaskFrequency">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="every_15_days">Every 15 days</option>
+              <option value="monthly">Monthly</option>
+              <option value="every_3_months">Every 3 months</option>
+              <option value="one_time">One time</option>
+            </select>
+          </label>
+
+          <label class="toolbar-field">
+            <span>Department</span>
+            <input type="text" id="assignTaskDepartment" readonly />
+          </label>
+
+          <label class="toolbar-field">
+            <span>Planned start</span>
+            <input type="date" id="assignTaskPlanned" required />
+          </label>
+
+          <label class="toolbar-field">
+            <span>Task ID</span>
+            <input type="text" id="assignTaskId" readonly />
+          </label>
+
+          <label class="toolbar-field toolbar-field--full">
+            <span>Task details</span>
+            <textarea
+              id="assignTaskDetails"
+              rows="4"
+              placeholder="Add the task details for the employee"
+              required
+            ></textarea>
+          </label>
+
+          <div class="add-user-actions">
+            <button type="submit" id="assignTaskSubmitButton" class="button button--primary">
+              Submit task
+            </button>
+            <p id="assignTaskMessage" class="message" aria-live="polite"></p>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="checklistModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card modal-card--wide">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Checklist</p>
+            <h2 id="checklistTaskTitle">COMPARE WALKINS</h2>
+            <p id="checklistTaskMeta" class="dashboard-copy"></p>
+          </div>
+          <button
+            type="button"
+            id="closeChecklistButton"
+            class="sidebar-close modal-close"
+            aria-label="Close checklist form"
+          >
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z"></path>
+            </svg>
+          </button>
+        </div>
+
+        <form id="checklistForm" class="checklist-form">
+          <div id="checklistFields" class="checklist-fields"></div>
+          <div id="checklistSubmitRow" class="add-user-actions">
+            <button type="submit" class="button button--primary">
+              Submit checklist
+            </button>
+            <p id="checklistMessage" class="message" aria-live="polite"></p>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="./js/utils.js"></script>
+    <script src="./js/data.js"></script>
+    <script src="./js/persistence.js"></script>
+    <script src="./js/business.js"></script>
+    <script src="./js/render.js"></script>
+    <script src="./js/handlers.js"></script>
+    <script src="./js/bootstrap.js"></script>
+  </body>
+</html>

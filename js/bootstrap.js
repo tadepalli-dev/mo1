@@ -1,0 +1,101 @@
+// bootstrap.js — extracted from app.js (3 declarations)
+
+async function initialize() {
+  await bootstrapState();
+  restoreRememberedEmail();
+  restoreSession();
+  populateFilters();
+  populateTaskAssigneeOptions();
+  populateAbsenceEmployeeOptions();
+  setHomeDefaults();
+  bindEvents();
+  if (state.currentView === "approvals") {
+    elements.approvalsDateInput.value = todayValue();
+  }
+  renderDashboard();
+  loadSheetLeaveData();
+  setInterval(loadSheetLeaveData, SHEET_LEAVE_REFRESH_MS);
+  setInterval(async () => {
+    if (!state.activeUser) {
+      return;
+    }
+    await refreshStateFromServer();
+    renderDashboard();
+  }, SERVER_STATE_REFRESH_MS);
+}
+
+
+function bindEvents() {
+  elements.loginForm.addEventListener("submit", handleLogin);
+  elements.useDemoUser.addEventListener("click", fillDemoUser);
+  elements.logoutButton.addEventListener("click", logout);
+  elements.addUserForm.addEventListener("submit", handleAddUser);
+  elements.toggleAddUserForm.addEventListener("click", handleToggleAddUserForm);
+  elements.searchInput.addEventListener("input", handleDirectorySearch);
+  elements.roleFilter.addEventListener("change", handleRoleFilterChange);
+  elements.dayOffFilter.addEventListener("change", handleDayOffFilterChange);
+  elements.dateRangeSelect.addEventListener("change", handleEmployeeTaskFilterChange);
+  elements.taskSelect.addEventListener("change", handleEmployeeTaskFilterChange);
+  elements.departmentSelect.addEventListener("change", handleEmployeeTaskFilterChange);
+  elements.homeSearchInput.addEventListener("input", handleHomeSearch);
+  elements.dashboardDateInput.addEventListener("change", handleAdminDateChange);
+  elements.closeAssignTaskButton.addEventListener("click", closeAssignTaskModal);
+  elements.assignTaskModal.addEventListener("click", handleAssignModalBackdropClick);
+  elements.assignTaskForm.addEventListener("submit", handleAssignTask);
+  elements.assignTaskUser.addEventListener("change", syncTaskAssignmentFields);
+  elements.assignTaskUser.addEventListener("input", syncTaskAssignmentFields);
+  elements.absenceForm.addEventListener("submit", handleAbsenceSubmit);
+  elements.coverageList.addEventListener("click", handleCoverageAction);
+  elements.sidebarToggle.addEventListener("click", toggleSidebar);
+  elements.sidebarClose.addEventListener("click", collapseSidebar);
+  elements.adminTaskBoard.addEventListener("click", handleAdminTaskAction);
+  elements.employeeTaskTableBody.addEventListener("click", handleEmployeeTaskAction);
+  elements.walkinCustomerBoard.addEventListener("click", handleEmployeeTaskAction);
+  elements.closeChecklistButton.addEventListener("click", closeChecklistModal);
+  elements.checklistModal.addEventListener("click", handleChecklistModalBackdropClick);
+  elements.checklistForm.addEventListener("submit", handleChecklistSubmit);
+  elements.checklistFields.addEventListener("click", handleChecklistFieldsClick);
+  elements.approvalsDateInput.addEventListener("change", handleApprovalsDateChange);
+  elements.approvalsCompletedBoard.addEventListener("click", handleApprovalsAction);
+  elements.kamalApprovalBoard.addEventListener("click", handleKamalApprovalAction);
+  elements.approvalsTabNav.addEventListener("click", handleApprovalsTabClick);
+  elements.liveShareBanner.addEventListener("click", handleLiveShareBannerClick);
+  document.addEventListener("click", handleGlobalClick);
+
+  elements.navLinks.forEach((link) => {
+    link.addEventListener("click", () => {
+      const nextView = link.dataset.view;
+      if (nextView) {
+        setCurrentView(nextView);
+      }
+    });
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      if (!elements.assignTaskModal.classList.contains("hidden")) {
+        closeAssignTaskModal();
+      }
+      if (!elements.checklistModal.classList.contains("hidden")) {
+        closeChecklistModal();
+      }
+    }
+  });
+
+  window.addEventListener("hashchange", () => {
+    // setCurrentView (nav-link clicks) already refreshes from the server and
+    // sets this same hash, which would otherwise double the request here.
+    // This listener only needs to cover hash changes it didn't cause itself
+    // — browser back/forward, or a manually edited URL.
+    if (state.currentView === getInitialView()) {
+      return;
+    }
+    state.currentView = getInitialView();
+    enforceAllowedView();
+    renderDashboard();
+    refreshStateFromServer().then(renderDashboard);
+  });
+}
+
+
+initialize();

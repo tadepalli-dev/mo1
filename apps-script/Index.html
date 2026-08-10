@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top" />
+    <style>
+      :root {
+        --surface: rgba(255, 255, 255, 0.84);
+        --text: #152126;
+        --muted: #617078;
+        --line: rgba(21, 33, 38, 0.12);
+        --brand: #1f6b63;
+        --brand-deep: #144a45;
+        --accent: #d17c41;
+        --shadow: 0 24px 64px rgba(35, 36, 39, 0.12);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-height: 100vh;
+        font-family: "Segoe UI", Arial, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(209, 124, 65, 0.22), transparent 28%),
+          radial-gradient(circle at bottom right, rgba(31, 107, 99, 0.16), transparent 24%),
+          linear-gradient(135deg, #f8f4ed 0%, #f0ece3 48%, #ebe7de 100%);
+      }
+
+      /* Login screen */
+      .login-layout { min-height: calc(100vh - 4rem); display: grid; place-items: center; padding: 2rem 1rem; }
+
+      /* Post-login shell: sidebar + content */
+      .app-shell {
+        display: none;
+        grid-template-columns: 260px minmax(0, 1fr);
+        gap: 1.25rem;
+        max-width: 1300px;
+        margin: 0 auto;
+        padding: 1.25rem;
+      }
+      .app-shell.open { display: grid; }
+
+      .sidebar {
+        display: flex; flex-direction: column; gap: 1rem;
+        min-height: calc(100vh - 2.5rem);
+        padding: 1.2rem; border-radius: 24px;
+        background:
+          radial-gradient(circle at top, rgba(52, 140, 130, 0.24), transparent 34%),
+          linear-gradient(180deg, #132e34 0%, #10282d 48%, #0d1d22 100%);
+        color: rgba(255, 255, 255, 0.84);
+        position: sticky; top: 1rem;
+      }
+      .sidebar-brand {
+        display: flex; align-items: center; gap: 0.85rem;
+        padding: 0.6rem; border-radius: 18px; background: rgba(255, 255, 255, 0.04);
+      }
+      .sidebar-brand__mark {
+        width: 40px; height: 40px; flex: none; border-radius: 12px;
+        background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+        display: grid; place-items: center; color: white; font-weight: 800; font-size: 1.1rem;
+      }
+      .sidebar-brand__copy .eyebrow-side { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.7; margin: 0; }
+      .sidebar-brand__copy strong { display: block; font-size: 0.98rem; }
+      .sidebar-nav { display: grid; gap: 0.4rem; margin-top: 0.4rem; }
+      .sidebar-link {
+        display: flex; align-items: center; gap: 0.7rem; text-align: left;
+        padding: 0.75rem 0.9rem; border-radius: 14px; color: inherit;
+        background: transparent; border: 0; cursor: pointer; font-size: 0.92rem; font-family: inherit;
+      }
+      .sidebar-link.active { background: rgba(255, 255, 255, 0.14); font-weight: 700; }
+      .sidebar-footer { margin-top: auto; display: grid; gap: 0.6rem; }
+      .sidebar-user-box { background: rgba(255, 255, 255, 0.06); border-radius: 14px; padding: 0.9rem; font-size: 0.85rem; }
+      .sidebar-user-box strong { display: block; margin-top: 0.15rem; font-size: 0.98rem; }
+      .sidebar-logout {
+        border: 0; cursor: pointer; border-radius: 999px; padding: 0.75rem 1rem;
+        background: rgba(255, 255, 255, 0.12); color: white; font-size: 0.9rem; font-weight: 600;
+      }
+      .sidebar-logout:hover { background: rgba(255, 255, 255, 0.2); }
+
+      .content-view { display: none; }
+      .content-view.open { display: block; }
+
+      .card {
+        position: relative; overflow: hidden; width: min(100%, 460px);
+        border: 1px solid rgba(255, 255, 255, 0.72); background: var(--surface);
+        backdrop-filter: blur(18px); box-shadow: var(--shadow); border-radius: 30px; padding: 2rem;
+        margin-bottom: 1.5rem;
+      }
+      .card--wide { width: 100%; }
+      .card::after {
+        content: ""; position: absolute; inset: auto -30px -50px auto;
+        width: 180px; height: 180px; border-radius: 999px;
+        background: rgba(209, 124, 65, 0.09); pointer-events: none;
+      }
+      .eyebrow {
+        margin: 0 0 0.55rem; font-size: 0.8rem; font-weight: 700;
+        letter-spacing: 0.14em; text-transform: uppercase; color: var(--brand);
+      }
+      h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; line-height: 1.06; font-size: clamp(1.6rem, 4vw, 2.4rem); }
+      h2 { margin: 1.6rem 0 0.8rem; font-family: Georgia, "Times New Roman", serif; font-size: 1.3rem; }
+      .copy { max-width: 46ch; font-size: 1rem; margin: 0.8rem 0 0; color: var(--muted); }
+      form { display: grid; gap: 1rem; margin-top: 1.4rem; }
+      .form-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+      label { display: grid; gap: 0.45rem; color: var(--muted); font-size: 0.92rem; }
+      input, select, textarea {
+        width: 100%; border: 1px solid var(--line); border-radius: 14px; padding: 0.9rem 1rem;
+        background: rgba(255, 255, 255, 0.82); color: var(--text); outline: none; font-size: 0.95rem;
+        font-family: inherit; transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+      }
+      textarea { resize: vertical; min-height: 90px; }
+      input:focus, select:focus, textarea:focus {
+        border-color: rgba(31, 107, 99, 0.58); box-shadow: 0 0 0 4px rgba(31, 107, 99, 0.12); transform: translateY(-1px);
+      }
+      button {
+        border: 0; cursor: pointer; border-radius: 999px; padding: 0.9rem 1.2rem;
+        background: linear-gradient(135deg, var(--brand) 0%, var(--brand-deep) 100%);
+        color: white; font-size: 0.95rem; font-weight: 600; transition: transform 160ms ease, opacity 160ms ease;
+      }
+      button:hover { transform: translateY(-1px); }
+      button:disabled { opacity: 0.6; cursor: default; transform: none; }
+      button.secondary { background: rgba(21, 33, 38, 0.08); color: var(--text); }
+      .message { min-height: 1.4rem; margin: 1rem 0 0; font-size: 0.92rem; }
+      .message.is-error { color: #a63f2a; }
+      .message.is-success { color: var(--brand); }
+      .banner {
+        background: var(--accent); color: white; padding: 0.9rem 1.2rem; border-radius: 16px;
+        font-size: 0.92rem; margin-bottom: 1.2rem;
+      }
+      .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+      th, td { padding: 0.65rem 0.8rem; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+      th { background: rgba(31, 107, 99, 0.08); color: var(--brand-deep); font-weight: 700; }
+      tr:last-child td { border-bottom: 0; }
+      .status-badge {
+        display: inline-block; padding: 0.35rem 0.8rem; border-radius: 999px;
+        background: rgba(31, 107, 99, 0.12); color: var(--brand-deep); font-size: 0.8rem; font-weight: 700;
+      }
+      .status-button { padding: 0.5rem 0.9rem; font-size: 0.82rem; }
+      .empty-note { padding: 1rem; color: var(--muted); }
+      .overlay {
+        display: none; position: fixed; inset: 0; background: rgba(21, 33, 38, 0.45);
+        place-items: center; padding: 1rem; z-index: 10;
+      }
+      .overlay.open { display: grid; }
+      .modal-card {
+        background: var(--surface); backdrop-filter: blur(18px); border-radius: 26px;
+        box-shadow: var(--shadow); padding: 1.75rem; width: min(100%, 520px); max-height: 90vh; overflow-y: auto;
+      }
+      .modal-actions { display: flex; gap: 0.75rem; margin-top: 1rem; }
+
+      @media (max-width: 860px) {
+        .app-shell.open { grid-template-columns: 1fr; }
+        .sidebar { position: static; min-height: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="login-layout" id="loginLayout">
+      <div class="card" id="loginCard">
+        <p class="eyebrow">MoTrack</p>
+        <h1>Sign in</h1>
+        <p class="copy">Enter your MoTrack email and password to view and manage your tasks.</p>
+        <form onsubmit="return false;">
+          <label>Work email <input type="email" id="email" placeholder="name@company.com" autocomplete="username" /></label>
+          <label>Password <input type="password" id="password" placeholder="Enter your password" autocomplete="current-password" /></label>
+          <button type="button" id="signInButton" onclick="doLogin()">Sign in</button>
+        </form>
+        <p class="message" id="loginMessage"></p>
+      </div>
+    </div>
+
+    <div class="app-shell" id="appShell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="sidebar-brand__mark">M</div>
+          <div class="sidebar-brand__copy">
+            <p class="eyebrow-side">MoTrack</p>
+            <strong>Viewer</strong>
+          </div>
+        </div>
+        <nav class="sidebar-nav">
+          <button class="sidebar-link active" id="navHome" onclick="showView('home')">🏠 Home</button>
+          <button class="sidebar-link" id="navBuddy" onclick="showView('buddy')">🤝 Buddy Coverage</button>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="sidebar-user-box">
+            Signed in as
+            <strong id="sidebarUserName"></strong>
+          </div>
+          <button class="sidebar-logout" onclick="doLogout()">Log out</button>
+        </div>
+      </aside>
+
+      <main>
+        <div class="content-view open" id="homeView">
+          <div class="card card--wide">
+            <p class="eyebrow">MoTrack Viewer</p>
+            <h1 id="welcomeMessage">Welcome</h1>
+            <div id="coverageBanner"></div>
+
+            <div id="employeeView">
+              <h2>My tasks today</h2>
+              <div class="table-wrap" id="myTasksContainer">Loading…</div>
+            </div>
+
+            <div id="adminView" style="display: none;">
+              <h2>Assign a task</h2>
+              <form onsubmit="return false;">
+                <div class="form-grid">
+                  <label>Employee
+                    <select id="assigneeSelect" onchange="onAssigneeChange()"></select>
+                  </label>
+                  <label>Task title <input type="text" id="taskTitle" placeholder="e.g. Compare walkins" /></label>
+                  <label>Frequency
+                    <select id="taskFrequency">
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="one_time">One time</option>
+                    </select>
+                  </label>
+                  <label>Department <input type="text" id="taskDepartment" placeholder="Auto-filled from employee" /></label>
+                  <label>Planned start <input type="date" id="taskPlannedDate" /></label>
+                </div>
+                <label>Task details <textarea id="taskDetails" placeholder="Add the task details for the employee"></textarea></label>
+                <button type="button" id="assignButton" onclick="doAssignTask()">Assign task</button>
+                <p class="message" id="assignMessage"></p>
+              </form>
+
+              <h2>Assigned by you</h2>
+              <div class="table-wrap" id="assignedByMeContainer">Loading…</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="content-view" id="buddyView">
+          <div class="card card--wide">
+            <p class="eyebrow">Buddy Coverage</p>
+            <h1>Today's coverage</h1>
+            <p class="copy">Employees whose week off falls today, and who is covering their tasks.</p>
+            <div class="table-wrap" id="buddyTableContainer">Loading…</div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="overlay" id="checklistOverlay">
+      <div class="modal-card">
+        <p class="eyebrow">Checklist</p>
+        <h1 id="checklistTitle" style="font-size: 1.3rem;">Task checklist</h1>
+        <p class="copy" id="checklistMeta"></p>
+        <div id="checklistFields"></div>
+        <p class="message" id="checklistMessage"></p>
+        <div class="modal-actions">
+          <button type="button" onclick="submitChecklistForm()">Submit checklist</button>
+          <button type="button" class="secondary" onclick="closeChecklist()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let currentUser = null;
+      let authToken = null;
+      let dashboardData = null;
+      let activeChecklistTask = null;
+      let todayStr = formatDate(new Date());
+
+      function formatDate(date) {
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, "0");
+        const d = String(date.getDate()).padStart(2, "0");
+        return y + "-" + m + "-" + d;
+      }
+
+      document.getElementById("password").addEventListener("keydown", function (event) {
+        if (event.key === "Enter") doLogin();
+      });
+
+      function doLogin() {
+        const email = document.getElementById("email").value.trim();
+        const password = document.getElementById("password").value;
+        const messageEl = document.getElementById("loginMessage");
+        const button = document.getElementById("signInButton");
+        messageEl.className = "message";
+        messageEl.textContent = "";
+
+        if (!password) {
+          messageEl.className = "message is-error";
+          messageEl.textContent = "Enter a password to continue.";
+          return;
+        }
+
+        button.disabled = true;
+        button.textContent = "Signing in…";
+
+        google.script.run
+          .withSuccessHandler(function (result) {
+            button.disabled = false;
+            button.textContent = "Sign in";
+
+            if (!result.ok) {
+              const messages = {
+                not_found: "This email is not in the MoTrack user list.",
+                missing_password: "Enter a password to continue.",
+                wrong_password: "Password is incorrect for this account.",
+              };
+              messageEl.className = "message is-error";
+              messageEl.textContent = messages[result.reason] || "Could not sign in.";
+              return;
+            }
+
+            currentUser = result.user;
+            authToken = result.token;
+            document.getElementById("loginLayout").style.display = "none";
+            document.getElementById("appShell").classList.add("open");
+            document.getElementById("welcomeMessage").textContent = "Welcome, " + currentUser.name;
+            document.getElementById("sidebarUserName").textContent = currentUser.name;
+            refreshDashboard();
+          })
+          .withFailureHandler(function (err) {
+            button.disabled = false;
+            button.textContent = "Sign in";
+            messageEl.className = "message is-error";
+            messageEl.textContent = "Could not reach the server: " + err.message;
+          })
+          .verifyLogin(email, password);
+      }
+
+      function doLogout() {
+        const tokenToRevoke = authToken;
+        currentUser = null;
+        authToken = null;
+        dashboardData = null;
+        document.getElementById("appShell").classList.remove("open");
+        document.getElementById("loginLayout").style.display = "grid";
+        document.getElementById("email").value = "";
+        document.getElementById("password").value = "";
+        document.getElementById("loginMessage").textContent = "You have been logged out.";
+        document.getElementById("loginMessage").className = "message is-success";
+        showView("home");
+        if (tokenToRevoke) {
+          google.script.run.logoutRemote(tokenToRevoke);
+        }
+      }
+
+      function showView(name) {
+        document.getElementById("homeView").classList.toggle("open", name === "home");
+        document.getElementById("buddyView").classList.toggle("open", name === "buddy");
+        document.getElementById("navHome").classList.toggle("active", name === "home");
+        document.getElementById("navBuddy").classList.toggle("active", name === "buddy");
+        if (name === "buddy" && dashboardData) {
+          renderBuddyList();
+        }
+      }
+
+      function refreshDashboard() {
+        google.script.run
+          .withSuccessHandler(function (data) {
+            dashboardData = data;
+            renderCoverageBanner();
+            if (data.canAssign) {
+              document.getElementById("employeeView").style.display = "none";
+              document.getElementById("adminView").style.display = "block";
+              populateAssigneeSelect();
+              renderAssignedByMe();
+            } else {
+              document.getElementById("employeeView").style.display = "block";
+              document.getElementById("adminView").style.display = "none";
+              renderMyTasks();
+            }
+            renderBuddyList();
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById("myTasksContainer").textContent = "Error loading data: " + err.message;
+          })
+          .getDashboardData(currentUser, todayStr);
+      }
+
+      function renderCoverageBanner() {
+        const el = document.getElementById("coverageBanner");
+        if (dashboardData.coverageMessage) {
+          el.innerHTML = '<div class="banner">🔔 ' + dashboardData.coverageMessage + "</div>";
+        } else {
+          el.innerHTML = "";
+        }
+      }
+
+      function renderBuddyList() {
+        const container = document.getElementById("buddyTableContainer");
+        if (!dashboardData) {
+          container.textContent = "Loading…";
+          return;
+        }
+        const list = dashboardData.todayCoverageList || [];
+        if (!list.length) {
+          container.innerHTML = '<p class="empty-note">Nobody’s week off falls today.</p>';
+          return;
+        }
+        let html = "<table><thead><tr><th>Employee</th><th>Week off</th><th>Buddy / covering</th></tr></thead><tbody>";
+        list.forEach(function (entry) {
+          html +=
+            "<tr><td>" + escapeHtml(entry.employee) + "</td>" +
+            "<td>" + escapeHtml(entry.weekOff) + "</td>" +
+            "<td>" + escapeHtml((entry.buddies || []).join(", ") || "-") + "</td></tr>";
+        });
+        html += "</tbody></table>";
+        container.innerHTML = html;
+      }
+
+      function renderMyTasks() {
+        const container = document.getElementById("myTasksContainer");
+        const tasks = dashboardData.myTasks;
+        if (!tasks.length) {
+          container.innerHTML = '<p class="empty-note">No tasks assigned for today.</p>';
+          return;
+        }
+        let html = "<table><thead><tr><th>Task</th><th>Freq</th><th>Department</th><th>Task ID</th><th>Update status</th></tr></thead><tbody>";
+        tasks.forEach(function (task) {
+          const key = (task.taskId || task.id) + "__" + todayStr;
+          const completed = Boolean(dashboardData.completions[key]);
+          html +=
+            "<tr><td>" + escapeHtml(task.title) + "</td>" +
+            "<td>" + escapeHtml(task.frequency) + "</td>" +
+            "<td>" + escapeHtml(task.department || "-") + "</td>" +
+            "<td>" + escapeHtml(task.taskId || task.id) + "</td>" +
+            "<td>" +
+            (completed
+              ? '<span class="status-badge">Completed</span>'
+              : '<button type="button" class="status-button" onclick="openChecklist(\'' + (task.taskId || task.id) + "', '" + escapeJs(task.title) + "'" + ")\">Task completed</button>") +
+            "</td></tr>";
+        });
+        html += "</tbody></table>";
+        container.innerHTML = html;
+      }
+
+      function renderAssignedByMe() {
+        const container = document.getElementById("assignedByMeContainer");
+        const tasks = dashboardData.assignedByMe;
+        if (!tasks.length) {
+          container.innerHTML = '<p class="empty-note">You have not assigned any tasks yet.</p>';
+          return;
+        }
+        let html = "<table><thead><tr><th>Employee</th><th>Task</th><th>Freq</th><th>Department</th><th>Planned</th><th>Task ID</th></tr></thead><tbody>";
+        tasks.forEach(function (task) {
+          html +=
+            "<tr><td>" + escapeHtml(task.assigneeName) + "</td>" +
+            "<td>" + escapeHtml(task.title) + "</td>" +
+            "<td>" + escapeHtml(task.frequency) + "</td>" +
+            "<td>" + escapeHtml(task.department || "-") + "</td>" +
+            "<td>" + escapeHtml(task.plannedDate) + "</td>" +
+            "<td>" + escapeHtml(task.taskId || task.id) + "</td></tr>";
+        });
+        html += "</tbody></table>";
+        container.innerHTML = html;
+      }
+
+      function populateAssigneeSelect() {
+        const select = document.getElementById("assigneeSelect");
+        select.innerHTML = "";
+        dashboardData.users
+          .slice()
+          .sort(function (a, b) { return a.name.localeCompare(b.name); })
+          .forEach(function (user) {
+            const option = document.createElement("option");
+            option.value = user.email;
+            option.textContent = user.name + " (" + user.email + ")";
+            option.dataset.name = user.name;
+            option.dataset.role = user.role;
+            option.dataset.department = user.designation || "";
+            select.appendChild(option);
+          });
+        document.getElementById("taskPlannedDate").value = todayStr;
+        onAssigneeChange();
+      }
+
+      function onAssigneeChange() {
+        const select = document.getElementById("assigneeSelect");
+        const option = select.options[select.selectedIndex];
+        if (option) {
+          document.getElementById("taskDepartment").value = option.dataset.department || "";
+        }
+      }
+
+      function doAssignTask() {
+        const select = document.getElementById("assigneeSelect");
+        const option = select.options[select.selectedIndex];
+        const messageEl = document.getElementById("assignMessage");
+        const button = document.getElementById("assignButton");
+
+        const title = document.getElementById("taskTitle").value.trim();
+        const plannedDate = document.getElementById("taskPlannedDate").value;
+        const details = document.getElementById("taskDetails").value.trim();
+
+        if (!option || !title || !plannedDate || !details) {
+          messageEl.className = "message is-error";
+          messageEl.textContent = "Fill in every field before assigning the task.";
+          return;
+        }
+
+        button.disabled = true;
+        button.textContent = "Assigning…";
+
+        const payload = {
+          assigneeEmail: option.value,
+          assigneeName: option.dataset.name,
+          assigneeRole: option.dataset.role,
+          title: title,
+          frequency: document.getElementById("taskFrequency").value,
+          department: document.getElementById("taskDepartment").value,
+          plannedDate: plannedDate,
+          details: details,
+          assignedByEmail: currentUser.email,
+          assignedByName: currentUser.name,
+        };
+
+        google.script.run
+          .withSuccessHandler(function () {
+            button.disabled = false;
+            button.textContent = "Assign task";
+            messageEl.className = "message is-success";
+            messageEl.textContent = "Task assigned to " + payload.assigneeName + ".";
+            document.getElementById("taskTitle").value = "";
+            document.getElementById("taskDetails").value = "";
+            refreshDashboard();
+          })
+          .withFailureHandler(function (err) {
+            button.disabled = false;
+            button.textContent = "Assign task";
+            messageEl.className = "message is-error";
+            messageEl.textContent = "Could not assign task: " + err.message;
+          })
+          .assignTask(payload, authToken);
+      }
+
+      function openChecklist(taskId, taskTitle) {
+        activeChecklistTask = { taskId: taskId, title: taskTitle };
+        document.getElementById("checklistTitle").textContent = taskTitle;
+        document.getElementById("checklistMeta").textContent = currentUser.name + " | " + todayStr + " | Task ID " + taskId;
+        document.getElementById("checklistFields").innerHTML = "Loading…";
+        document.getElementById("checklistMessage").textContent = "";
+        document.getElementById("checklistOverlay").classList.add("open");
+
+        google.script.run
+          .withSuccessHandler(function (questions) {
+            renderChecklistFields(questions);
+          })
+          .withFailureHandler(function (err) {
+            document.getElementById("checklistFields").textContent = "Error: " + err.message;
+          })
+          .getChecklistQuestions(taskTitle);
+      }
+
+      function renderChecklistFields(questions) {
+        const container = document.getElementById("checklistFields");
+        container.innerHTML = "";
+        questions.forEach(function (q) {
+          const wrapper = document.createElement("label");
+          wrapper.style.marginBottom = "0.9rem";
+          wrapper.style.display = "grid";
+          const span = document.createElement("strong");
+          span.textContent = q.label;
+          span.style.color = "var(--text)";
+          wrapper.appendChild(span);
+          const input = document.createElement(q.type === "textarea" ? "textarea" : "input");
+          if (q.type !== "textarea") input.type = q.type === "number" ? "number" : "text";
+          input.id = "field-" + q.id;
+          input.dataset.qid = q.id;
+          wrapper.appendChild(input);
+          container.appendChild(wrapper);
+        });
+      }
+
+      function submitChecklistForm() {
+        const inputs = document.querySelectorAll("#checklistFields [data-qid]");
+        const responses = {};
+        let hasEmpty = false;
+        inputs.forEach(function (input) {
+          responses[input.dataset.qid] = input.value;
+          if (!input.value) hasEmpty = true;
+        });
+
+        if (hasEmpty) {
+          const messageEl = document.getElementById("checklistMessage");
+          messageEl.className = "message is-error";
+          messageEl.textContent = "Fill in every field before submitting.";
+          return;
+        }
+
+        google.script.run
+          .withSuccessHandler(function () {
+            closeChecklist();
+            refreshDashboard();
+          })
+          .withFailureHandler(function (err) {
+            const messageEl = document.getElementById("checklistMessage");
+            messageEl.className = "message is-error";
+            messageEl.textContent = "Could not submit: " + err.message;
+          })
+          .submitChecklist(activeChecklistTask.taskId, todayStr, responses, authToken);
+      }
+
+      function closeChecklist() {
+        document.getElementById("checklistOverlay").classList.remove("open");
+        activeChecklistTask = null;
+      }
+
+      function escapeHtml(value) {
+        return String(value == null ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function escapeJs(value) {
+        return String(value == null ? "" : value).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+      }
+    </script>
+  </body>
+</html>

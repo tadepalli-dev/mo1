@@ -1,0 +1,1532 @@
+// handlers.js — extracted from app.js (36 declarations)
+
+function handleGlobalClick(event) {
+  const openAssignTrigger = event.target.closest("[data-open-assign-modal]");
+  if (openAssignTrigger) {
+    openAssignTaskModal();
+    return;
+  }
+}
+
+async function autoFillVehicleFieldsFromLoginEmail(task) {
+  const vehicleNumberField = document.getElementById("question-vehicle_number");
+  const vehicleTypeField = document.getElementById("question-vehicle_type");
+  if (!vehicleNumberField || !vehicleTypeField || !state.activeUser) {
+    return;
+  }
+
+  const expectedTask = state.activeChecklistTask;
+  setStatusMessage(elements.checklistMessage, "Looking up your vehicle from the sheet…", "");
+
+  try {
+    const result = await fetchVehicleAssignmentForActiveUser();
+    if (state.activeChecklistTask !== expectedTask || state.activeChecklistTask !== task) {
+      return;
+    }
+
+    if (!result.match) {
+      setStatusMessage(
+        elements.checklistMessage,
+        `No vehicle mapping was found for ${state.activeUser.email}. Enter it manually.`,
+        ""
+      );
+      return;
+    }
+
+    if (!vehicleNumberField.value) {
+      vehicleNumberField.value = result.match.vehicleNumber;
+      vehicleNumberField.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    if (!vehicleTypeField.value) {
+      vehicleTypeField.value = result.match.vehicleType;
+      vehicleTypeField.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    setStatusMessage(
+      elements.checklistMessage,
+      `Auto-filled ${result.match.vehicleType.toLowerCase()} details from the ${result.match.sourceLabel} sheet.`,
+      "success"
+    );
+  } catch (error) {
+    if (state.activeChecklistTask !== expectedTask || state.activeChecklistTask !== task) {
+      return;
+    }
+    setStatusMessage(
+      elements.checklistMessage,
+      `Couldn't load vehicle details automatically. ${error.message}`,
+      "error"
+    );
+  }
+}
+
+
+async function handleLogin(event) {
+  event.preventDefault();
+
+  const email = elements.emailInput.value.trim().toLowerCase();
+  const password = elements.passwordInput.value.trim();
+
+  setStatusMessage(elements.loginMessage, "Signing in…", "");
+
+  // Temporary login mode: the server currently authenticates by known email
+  // only, then returns a session token for the rest of the app.
+  let result;
+  try {
+    const response = await fetch(buildApiUrl("/api/login"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    result = await response.json();
+  } catch (error) {
+    setStatusMessage(elements.loginMessage, "Could not reach the server to sign in. Try again.", "error");
+    return;
+  }
+
+  if (!result.ok) {
+    const messages = {
+      not_found: "This email is not in the MoTrack user list.",
+      missing_password: "Enter a password to continue.",
+      wrong_password: "Password is incorrect for this account.",
+    };
+    setStatusMessage(elements.loginMessage, messages[result.reason] || "Could not sign in.", "error");
+    return;
+  }
+
+  saveAuthToken(result.token);
+  await refreshStateFromServer();
+
+  state.activeUser = result.user;
+  state.currentView = allowedView(state.currentView);
+  saveSession(result.user.email);
+  saveRememberedEmail();
+  toggleViews(true);
+  setHomeDefaults();
+  renderDashboard();
+  setStatusMessage(elements.loginMessage, `Welcome, ${result.user.name}.`, "success");
+}
+
+
+function handleAddUser(event) {
+  event.preventDefault();
+
+  const email = elements.newUserEmail.value.trim().toLowerCase();
+  const alreadyExists = state.users.some((user) => user.email.toLowerCase() === email);
+  if (alreadyExists) {
+    setStatusMessage(elements.addUserMessage, "A user with this email already exists.", "error");
+    return;
+  }
+
+  const user = {
+    name: elements.newUserName.value.trim(),
+    email,
+    role: elements.newUserRole.value.trim(),
+    designation: elements.newUserDesignation.value.trim() || "-",
+    code: elements.newUserCode.value.trim() || "-",
+    dayOff: elements.newUserDayOff.value || "-",
+    password: elements.newUserPassword.value.trim(),
+  };
+
+  state.users.unshift(user);
+  saveUsers();
+  elements.addUserForm.reset();
+  elements.newUserDayOff.value = "-";
+  refreshUserViews();
+  setStatusMessage(elements.addUserMessage, `${user.name} was added and is now visible in MoTrack.`, "success");
+}
+
+
+function handleToggleAddUserForm() {
+  const isHidden = elements.addUserForm.classList.toggle("hidden");
+  elements.toggleAddUserForm.textContent = isHidden ? "+ Add user" : "✕ Close";
+  elements.userStatsStrip.classList.toggle("hidden", !isHidden);
+  elements.userDirectoryPanel.classList.toggle("hidden", !isHidden);
+}
+
+
+function handleAssignTask(event) {
+  event.preventDefault();
+
+  if (!canAssignTasks(state.activeUser)) {
+    setStatusMessage(elements.assignTaskMessage, "Only admin users with EA designation can assign tasks.", "error");
+    return;
+  }
+
+  const assignee = resolveTaskAssignee(elements.assignTaskUser.value);
+  if (!assignee) {
+    setStatusMessage(elements.assignTaskMessage, "Select a valid employee first.", "error");
+    return;
+  }
+
+  const plannedDate = normalizePlannedDate(
+    elements.assignTaskPlanned.value || DEFAULT_TASK_START_DATE
+  );
+  const frequency = normalizeFrequency(elements.assignTaskFrequency.value);
+  const task = normalizeTask({
+    id: state.editingTaskId || elements.assignTaskId.value.trim(),
+    taskId: elements.assignTaskId.value.trim(),
+    title: elements.assignTaskTitle.value.trim(),
+    frequency,
+    department: elements.assignTaskDepartment.value.trim(),
+    plannedDate,
+    validUntil: calculateValidUntil(plannedDate, frequency),
+    details: elements.assignTaskDetails.value.trim(),
+    createdAt: new Date().toISOString(),
+    assigneeEmail: assignee.email,
+    assigneeName: assignee.name,
+    assigneeRole: assignee.role,
+    assignedByEmail: state.activeUser.email,
+    assignedByName: state.activeUser.name,
+    active: true,
+  });
+
+  const isEditing = Boolean(state.editingTaskId);
+  const requiredDefinition = getRequiredOperationalDefinition(task);
+  if (requiredDefinition) {
+    removeDeletedRequiredTaskId(requiredDefinition.taskId);
+    saveDeletedRequiredTaskIds();
+  }
+
+  if (isEditing) {
+    const taskIndex = state.tasks.findIndex((item) => String(item.id) === String(state.editingTaskId));
+    if (taskIndex >= 0) {
+      state.tasks[taskIndex] = {
+        ...state.tasks[taskIndex],
+        ...task,
+      };
+    } else {
+      state.tasks.unshift(task);
+    }
+  } else {
+    state.tasks.unshift(task);
+  }
+
+  saveTasks();
+  closeAssignTaskModal();
+  renderDashboard();
+  setStatusMessage(
+    elements.assignTaskMessage,
+    isEditing
+      ? `Task updated for ${assignee.name}. It repeats from ${formatDateValue(plannedDate)} through ${formatDateValue(task.validUntil)}.`
+      : `Task assigned to ${assignee.name}. It repeats from ${formatDateValue(plannedDate)} through ${formatDateValue(task.validUntil)}.`,
+    "success"
+  );
+}
+
+
+function handleChecklistSubmit(event) {
+  event.preventDefault();
+
+  if (!state.activeChecklistTask) {
+    setStatusMessage(elements.checklistMessage, "No task is selected for checklist submission.", "error");
+    return;
+  }
+
+  if (isPantryTask(state.activeChecklistTask)) {
+    handlePantryChecklistSubmit();
+    return;
+  }
+
+  if (isGeneratorChecklistTask(state.activeChecklistTask)) {
+    handleGeneratorChecklistSubmit();
+    return;
+  }
+
+  if (isCashHandlingChecklistTask(state.activeChecklistTask)) {
+    handleCashHandlingChecklistSubmit();
+    return;
+  }
+
+  if (isMeterReadingChecklistTask(state.activeChecklistTask)) {
+    handleMeterReadingChecklistSubmit();
+    return;
+  }
+
+  if (isEarthingCleaningTask(state.activeChecklistTask)) {
+    handleEarthingCleaningChecklistSubmit();
+    return;
+  }
+
+  const template = getChecklistTemplate(state.activeChecklistTask);
+
+  const unansweredCheckbox = template.questions.find(
+    (question) => question.type === "checkbox" && !getCheckboxQuestionAnswer(question)
+  );
+  if (unansweredCheckbox) {
+    setStatusMessage(elements.checklistMessage, `Select Yes or No for "${unansweredCheckbox.label}".`, "error");
+    return;
+  }
+
+  const missingFollowUp = template.questions.find((question) => {
+    if (question.type !== "checkbox" || !question.followUpOnNo) {
+      return false;
+    }
+    if (getCheckboxQuestionAnswer(question) !== "No") {
+      return false;
+    }
+    const followUpField = document.getElementById(`question-${question.id}-followup`);
+    return !followUpField?.value.trim();
+  });
+  if (missingFollowUp) {
+    setStatusMessage(elements.checklistMessage, `Answer "${missingFollowUp.followUpOnNo.label}".`, "error");
+    return;
+  }
+
+  const responses = collectChecklistResponses(template);
+  const completionKey = getCompletionKey(state.activeChecklistTask);
+  const submittedAt = new Date().toISOString();
+
+  state.completions[completionKey] = {
+    taskId: state.activeChecklistTask.taskId || state.activeChecklistTask.id,
+    occurrenceDate: state.activeChecklistTask.occurrenceDate,
+    occurrenceSlot: state.activeChecklistTask.occurrenceSlot || null,
+    occurrenceSlotLabel: state.activeChecklistTask.occurrenceSlotLabel || "",
+    submittedAt,
+    responses,
+    approvalStatus: "pending",
+    ...(requiresKamalPreApproval(state.activeChecklistTask) ? { kamalApprovalStatus: "pending" } : {}),
+  };
+
+  saveCompletions();
+  exportChecklistSubmissionToSheet(state.activeChecklistTask, responses, submittedAt);
+  syncSubmissionReport();
+  closeChecklistModal();
+  renderEmployeeTaskBoard();
+  renderApprovalsPage();
+}
+
+
+function exportChecklistSubmissionToSheet(task, responses, submittedAt) {
+  if (normalizeTaskTitle(task?.title) !== "ac checklist") {
+    return;
+  }
+
+  const payload = {
+    taskId: task.taskId || task.id,
+    taskTitle: task.title,
+    assigneeName: task.assigneeName,
+    occurrenceDate: task.occurrenceDate,
+    occurrenceSlot: task.occurrenceSlot || null,
+    occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+    submittedAt,
+    responses,
+  };
+  const primaryUrl = buildApiUrl("/api/checklist-sheet-submission");
+  const fallbackUrl = "/api/checklist-sheet-submission";
+  const shouldTryFallback = primaryUrl !== fallbackUrl;
+
+  const sendSubmission = (url) =>
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(payload),
+    }).then((response) => {
+      if (!response.ok) {
+        throw new Error(`Checklist sheet export failed with status ${response.status}.`);
+      }
+      return response.json();
+    });
+
+  sendSubmission(primaryUrl)
+    .catch((error) => {
+      if (!shouldTryFallback) {
+        throw error;
+      }
+      console.warn(`Primary checklist sheet export failed for ${primaryUrl}; retrying ${fallbackUrl}.`, error);
+      return sendSubmission(fallbackUrl);
+    })
+    .catch((error) => {
+      console.error("Could not export checklist submission to Google Sheets.", error);
+    });
+}
+
+
+// Rebuilds the whole Submissions Report sheet from scratch — every occurrence
+// of every active task, submitted or not, so pending rows show up (Actual
+// Date "-") and flip to a real date/score the moment they're submitted. This
+// is a fire-and-forget side effect — it never blocks or surfaces errors in
+// the checklist flow, since the report is a secondary record, not the source
+// of truth (state.completions is).
+function syncSubmissionReport() {
+  fetch(buildApiUrl("/api/submission-report-sync"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ rows: buildSubmissionAuditRows() }),
+  }).catch((error) => {
+    console.error("Could not sync the submission report.", error);
+  });
+}
+
+
+// Opening the form is a separate, repeatable action from marking a visit
+// done — MoTrack can't see whether the Google form was actually submitted,
+// so completion is a deliberate manual confirmation (the checkbox), not
+// something that happens automatically just from opening the link.
+function handleVisitOpenClick(visitNumber) {
+  window.open(CONSTRUCTION_SITE_FORM_URL, "_blank", "noopener");
+}
+
+
+function handleVisitConfirmChange(visitNumber) {
+  const task = state.activeChecklistTask;
+  const submittedAt = new Date().toISOString();
+  state.completions[getVisitCompletionKey(task, visitNumber)] = {
+    taskId: task.taskId || task.id,
+    occurrenceDate: task.occurrenceDate,
+    occurrenceSlot: task.occurrenceSlot || null,
+    occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+    visitNumber,
+    submittedAt,
+    responses: { openedForm: true, formUrl: CONSTRUCTION_SITE_FORM_URL },
+  };
+
+  const visits = {};
+  for (let number = 1; number <= SITE_VISIT_COUNT; number++) {
+    const visitCompletion = state.completions[getVisitCompletionKey(task, number)];
+    visits[number] = visitCompletion ? visitCompletion.responses : null;
+  }
+  const allVisitsDone = Object.values(visits).every(Boolean);
+
+  if (allVisitsDone) {
+    state.completions[getCompletionKey(task)] = {
+      taskId: task.taskId || task.id,
+      occurrenceDate: task.occurrenceDate,
+      occurrenceSlot: task.occurrenceSlot || null,
+      occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+      submittedAt,
+      responses: { visits },
+      approvalStatus: "pending",
+    };
+  }
+
+  saveCompletions();
+  syncSubmissionReport();
+  renderEmployeeTaskBoard();
+  renderApprovalsPage();
+
+  if (allVisitsDone) {
+    closeChecklistModal();
+  } else {
+    renderVisitPicker(task);
+  }
+}
+
+
+function handleGeneratorChecklistSubmit() {
+  const task = state.activeChecklistTask;
+  const generatorUnit = state.activeGeneratorUnit;
+
+  if (!generatorUnit) {
+    setStatusMessage(elements.checklistMessage, "Select a generator first.", "error");
+    return;
+  }
+
+  const template = buildGeneratorChecklistTemplate(generatorUnit);
+  const responses = collectChecklistResponses(template);
+  const submittedAt = new Date().toISOString();
+
+  state.completions[getGeneratorCompletionKey(task, generatorUnit)] = {
+    taskId: task.taskId || task.id,
+    occurrenceDate: task.occurrenceDate,
+    occurrenceSlot: task.occurrenceSlot || null,
+    occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+    generatorUnit,
+    submittedAt,
+    responses: {
+      ...responses,
+      generator_unit: generatorUnit,
+    },
+  };
+
+  const generators = {};
+  GENERATOR_CHECKLIST_UNITS.forEach((unit) => {
+    const completion = state.completions[getGeneratorCompletionKey(task, unit)];
+    generators[unit] = completion ? completion.responses : null;
+  });
+
+  const allGeneratorsDone = GENERATOR_CHECKLIST_UNITS.every((unit) =>
+    Boolean(state.completions[getGeneratorCompletionKey(task, unit)])
+  );
+
+  if (allGeneratorsDone) {
+    state.completions[getCompletionKey(task)] = {
+      taskId: task.taskId || task.id,
+      occurrenceDate: task.occurrenceDate,
+      occurrenceSlot: task.occurrenceSlot || null,
+      occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+      submittedAt,
+      responses: { generators },
+      approvalStatus: "pending",
+    };
+  }
+
+  saveCompletions();
+  syncSubmissionReport();
+  renderEmployeeTaskBoard();
+  renderApprovalsPage();
+
+  if (allGeneratorsDone) {
+    closeChecklistModal();
+    return;
+  }
+
+  renderGeneratorPicker(task);
+  setStatusMessage(
+    elements.checklistMessage,
+    `${generatorUnit} checklist saved. Select the next generator.`,
+    "success"
+  );
+}
+
+
+function handleCashHandlingChecklistSubmit() {
+  const task = state.activeChecklistTask;
+  const shift = state.activeCashHandlingShift;
+
+  if (!shift) {
+    setStatusMessage(elements.checklistMessage, "Select a shift first.", "error");
+    return;
+  }
+
+  const template = buildCashHandlingChecklistTemplate(shift);
+  const responses = collectChecklistResponses(template);
+  const denominations = collectCashDenominationRows();
+  const coinsAmount = Number(elements.checklistFields.querySelector(".cash-coins-input")?.value) || 0;
+  const totalAmount = denominations.reduce((sum, row) => sum + row.amount, 0) + coinsAmount;
+  const submittedAt = new Date().toISOString();
+
+  state.completions[getCashHandlingCompletionKey(task, shift)] = {
+    taskId: task.taskId || task.id,
+    occurrenceDate: task.occurrenceDate,
+    occurrenceSlot: task.occurrenceSlot || null,
+    occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+    shift,
+    submittedAt,
+    responses: {
+      ...responses,
+      shift,
+      denominations,
+      coins_amount: coinsAmount,
+      total_cash_amount: totalAmount,
+    },
+  };
+
+  const shifts = {};
+  CASH_HANDLING_SHIFTS.forEach((shiftName) => {
+    const completion = state.completions[getCashHandlingCompletionKey(task, shiftName)];
+    shifts[shiftName] = completion ? completion.responses : null;
+  });
+
+  const allShiftsDone = CASH_HANDLING_SHIFTS.every((shiftName) =>
+    Boolean(state.completions[getCashHandlingCompletionKey(task, shiftName)])
+  );
+
+  if (allShiftsDone) {
+    state.completions[getCompletionKey(task)] = {
+      taskId: task.taskId || task.id,
+      occurrenceDate: task.occurrenceDate,
+      occurrenceSlot: task.occurrenceSlot || null,
+      occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+      submittedAt,
+      responses: { shifts },
+      approvalStatus: "pending",
+    };
+  }
+
+  saveCompletions();
+  syncSubmissionReport();
+  renderEmployeeTaskBoard();
+  renderApprovalsPage();
+
+  if (allShiftsDone) {
+    closeChecklistModal();
+    return;
+  }
+
+  renderCashHandlingPicker(task);
+  setStatusMessage(
+    elements.checklistMessage,
+    `${shift} checklist saved. Select the next shift.`,
+    "success"
+  );
+}
+
+
+function handleMeterReadingChecklistSubmit() {
+  const task = state.activeChecklistTask;
+  const location = state.activeMeterReadingLocation;
+
+  if (!location) {
+    setStatusMessage(elements.checklistMessage, "Select a location first.", "error");
+    return;
+  }
+
+  const template = buildMeterReadingChecklistTemplate(location);
+  const responses = collectChecklistResponses(template);
+  const submittedAt = new Date().toISOString();
+
+  state.completions[getMeterReadingCompletionKey(task, location)] = {
+    taskId: task.taskId || task.id,
+    occurrenceDate: task.occurrenceDate,
+    occurrenceSlot: task.occurrenceSlot || null,
+    occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+    location,
+    submittedAt,
+    responses: {
+      ...responses,
+      location,
+    },
+  };
+
+  const locations = {};
+  METER_READING_LOCATIONS.forEach((locationName) => {
+    const completion = state.completions[getMeterReadingCompletionKey(task, locationName)];
+    locations[locationName] = completion ? completion.responses : null;
+  });
+
+  const allLocationsDone = METER_READING_LOCATIONS.every((locationName) =>
+    Boolean(state.completions[getMeterReadingCompletionKey(task, locationName)])
+  );
+
+  if (allLocationsDone) {
+    state.completions[getCompletionKey(task)] = {
+      taskId: task.taskId || task.id,
+      occurrenceDate: task.occurrenceDate,
+      occurrenceSlot: task.occurrenceSlot || null,
+      occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+      submittedAt,
+      responses: { locations },
+      approvalStatus: "pending",
+    };
+  }
+
+  saveCompletions();
+  syncSubmissionReport();
+  renderEmployeeTaskBoard();
+  renderApprovalsPage();
+
+  if (allLocationsDone) {
+    closeChecklistModal();
+    return;
+  }
+
+  renderMeterReadingPicker(task);
+  setStatusMessage(
+    elements.checklistMessage,
+    `${location} checklist saved. Select the next location.`,
+    "success"
+  );
+}
+
+
+function handleEarthingCleaningChecklistSubmit() {
+  const task = state.activeChecklistTask;
+  const location = state.activeEarthingCleaningLocation;
+
+  if (!location) {
+    setStatusMessage(elements.checklistMessage, "Select a location first.", "error");
+    return;
+  }
+
+  const template = buildEarthingCleaningChecklistTemplate(location);
+  const responses = collectChecklistResponses(template);
+  const submittedAt = new Date().toISOString();
+
+  state.completions[getEarthingCleaningCompletionKey(task, location)] = {
+    taskId: task.taskId || task.id,
+    occurrenceDate: task.occurrenceDate,
+    occurrenceSlot: task.occurrenceSlot || null,
+    occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+    location,
+    submittedAt,
+    responses: {
+      ...responses,
+      location,
+    },
+  };
+
+  const locations = {};
+  EARTHING_CLEANING_LOCATIONS.forEach((locationName) => {
+    const completion = state.completions[getEarthingCleaningCompletionKey(task, locationName)];
+    locations[locationName] = completion ? completion.responses : null;
+  });
+
+  const allLocationsDone = EARTHING_CLEANING_LOCATIONS.every((locationName) =>
+    Boolean(state.completions[getEarthingCleaningCompletionKey(task, locationName)])
+  );
+
+  if (allLocationsDone) {
+    state.completions[getCompletionKey(task)] = {
+      taskId: task.taskId || task.id,
+      occurrenceDate: task.occurrenceDate,
+      occurrenceSlot: task.occurrenceSlot || null,
+      occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+      submittedAt,
+      responses: { locations },
+      approvalStatus: "pending",
+    };
+  }
+
+  saveCompletions();
+  syncSubmissionReport();
+  renderEmployeeTaskBoard();
+  renderApprovalsPage();
+
+  if (allLocationsDone) {
+    closeChecklistModal();
+    return;
+  }
+
+  renderEarthingCleaningPicker(task);
+  setStatusMessage(
+    elements.checklistMessage,
+    `${location} checklist saved. Select the next location.`,
+    "success"
+  );
+}
+
+
+function handlePantryChecklistSubmit() {
+  if (!state.pantryFormLocation) {
+    setStatusMessage(elements.checklistMessage, "Select MO1 or MO2 before submitting the checklist.", "error");
+    return;
+  }
+
+  const quantityInputs = [...elements.checklistFields.querySelectorAll(".pantry-input--quantity")];
+  if (!quantityInputs.length || quantityInputs.some((input) => input.value.trim() === "")) {
+    setStatusMessage(elements.checklistMessage, "Enter the counted quantity for every item.", "error");
+    return;
+  }
+
+  const task = state.activeChecklistTask;
+  const location = state.pantryFormLocation;
+  const submittedAt = new Date().toISOString();
+
+  const items = quantityInputs.map((quantityInput) => {
+    return {
+      item: quantityInput.getAttribute("data-pantry-item"),
+      expectedQuantity: Number(quantityInput.getAttribute("data-pantry-expected")),
+      submittedQuantity: Number(quantityInput.value),
+    };
+  });
+
+  const mismatches = items.filter((row) => row.submittedQuantity !== row.expectedQuantity);
+  const completionKey = getCompletionKey(task);
+
+  state.completions[completionKey] = {
+    taskId: task.taskId || task.id,
+    occurrenceDate: task.occurrenceDate,
+    occurrenceSlot: task.occurrenceSlot || null,
+    occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+    submittedAt,
+    location,
+    responses: { items },
+    approvalStatus: "pending",
+  };
+  saveCompletions();
+  syncSubmissionReport();
+
+  if (mismatches.length) {
+    mismatches.forEach((row) => {
+      state.pantryAlerts.unshift({
+        id: `${completionKey}__${normalizePersonName(row.item)}__${Date.now()}`,
+        taskId: task.taskId || task.id,
+        occurrenceDate: task.occurrenceDate,
+        location,
+        employeeName: task.assigneeName,
+        item: row.item,
+        submittedQuantity: row.submittedQuantity,
+        expectedQuantity: row.expectedQuantity,
+        submittedAt,
+      });
+    });
+    savePantryAlerts();
+  }
+
+  closeChecklistModal();
+  renderEmployeeTaskBoard();
+  renderPantryAlertsPanel();
+  renderApprovalsPage();
+}
+
+
+function handleChecklistFieldsClick(event) {
+  const locationTrigger = event.target.closest("[data-pantry-location]");
+  if (locationTrigger) {
+    renderPantryChecklistTable(locationTrigger.getAttribute("data-pantry-location"));
+    return;
+  }
+
+  const resetTrigger = event.target.closest("[data-pantry-location-reset]");
+  if (resetTrigger) {
+    state.pantryFormLocation = null;
+    renderPantryLocationPicker();
+    return;
+  }
+
+  const visitOpenTrigger = event.target.closest("[data-visit-open]");
+  if (visitOpenTrigger) {
+    handleVisitOpenClick(Number(visitOpenTrigger.getAttribute("data-visit-open")));
+    return;
+  }
+
+  const visitConfirmTrigger = event.target.closest("[data-visit-confirm]");
+  if (visitConfirmTrigger) {
+    handleVisitConfirmChange(Number(visitConfirmTrigger.getAttribute("data-visit-confirm")));
+    return;
+  }
+
+  const generatorOpenTrigger = event.target.closest("[data-generator-open]");
+  if (generatorOpenTrigger) {
+    renderGeneratorChecklist(state.activeChecklistTask, generatorOpenTrigger.getAttribute("data-generator-open"));
+    return;
+  }
+
+  const generatorResetTrigger = event.target.closest("[data-generator-reset]");
+  if (generatorResetTrigger) {
+    renderGeneratorPicker(state.activeChecklistTask);
+    return;
+  }
+
+  const cashShiftOpenTrigger = event.target.closest("[data-cash-shift-open]");
+  if (cashShiftOpenTrigger) {
+    renderCashHandlingChecklist(state.activeChecklistTask, cashShiftOpenTrigger.getAttribute("data-cash-shift-open"));
+    return;
+  }
+
+  const cashShiftResetTrigger = event.target.closest("[data-cash-shift-reset]");
+  if (cashShiftResetTrigger) {
+    renderCashHandlingPicker(state.activeChecklistTask);
+    return;
+  }
+
+  const meterLocationOpenTrigger = event.target.closest("[data-meter-location-open]");
+  if (meterLocationOpenTrigger) {
+    renderMeterReadingChecklist(state.activeChecklistTask, meterLocationOpenTrigger.getAttribute("data-meter-location-open"));
+    return;
+  }
+
+  const meterLocationResetTrigger = event.target.closest("[data-meter-location-reset]");
+  if (meterLocationResetTrigger) {
+    renderMeterReadingPicker(state.activeChecklistTask);
+    return;
+  }
+
+  const earthingLocationOpenTrigger = event.target.closest("[data-earthing-location-open]");
+  if (earthingLocationOpenTrigger) {
+    renderEarthingCleaningChecklist(state.activeChecklistTask, earthingLocationOpenTrigger.getAttribute("data-earthing-location-open"));
+    return;
+  }
+
+  const earthingLocationResetTrigger = event.target.closest("[data-earthing-location-reset]");
+  if (earthingLocationResetTrigger) {
+    renderEarthingCleaningPicker(state.activeChecklistTask);
+    return;
+  }
+
+  const shareTrigger = event.target.closest("[data-share-duration]");
+  if (shareTrigger) {
+    startLiveLocationShare(Number(shareTrigger.getAttribute("data-share-duration")));
+    return;
+  }
+
+  const stopShareTrigger = event.target.closest("[data-stop-sharing]");
+  if (stopShareTrigger) {
+    stopLiveLocationShare();
+  }
+}
+
+
+function startLiveLocationShare(durationMinutes) {
+  if (!navigator.geolocation) {
+    setStatusMessage(elements.checklistMessage, "Location sharing isn't supported in this browser.", "error");
+    return;
+  }
+
+  const task = state.activeChecklistTask;
+  state.myLocationTask = task ? { taskId: task.taskId || task.id, title: task.title } : null;
+  state.myLocationExpiresAt = Date.now() + durationMinutes * 60 * 1000;
+
+  state.myLocationWatchId = navigator.geolocation.watchPosition(handleGeolocationUpdate, handleGeolocationError, {
+    enableHighAccuracy: true,
+    maximumAge: 10000,
+    timeout: 20000,
+  });
+
+  if (state.myLocationExpiryTimer) {
+    clearInterval(state.myLocationExpiryTimer);
+  }
+  state.myLocationExpiryTimer = setInterval(checkMyLocationExpiry, 15000);
+
+  renderLiveShareBanner();
+  refreshLocationControlInPlace();
+}
+
+
+function handleGeolocationUpdate(position) {
+  const now = Date.now();
+  const alreadySharing = Boolean(state.liveLocations[state.activeUser.email]);
+  if (alreadySharing && now - state.myLocationLastPushAt < 8000) {
+    return;
+  }
+  state.myLocationLastPushAt = now;
+
+  state.liveLocations[state.activeUser.email] = {
+    employeeEmail: state.activeUser.email,
+    employeeName: state.activeUser.name,
+    taskId: state.myLocationTask?.taskId || null,
+    taskTitle: state.myLocationTask?.title || null,
+    lat: position.coords.latitude,
+    lng: position.coords.longitude,
+    accuracy: position.coords.accuracy,
+    updatedAt: new Date().toISOString(),
+    expiresAt: state.myLocationExpiresAt,
+  };
+  saveLiveLocations();
+  renderApprovalsLivePage(state.currentView === "approvals" && state.approvalsTab === "live");
+
+  if (state.checklistMapInstance) {
+    refreshChecklistMapPosition();
+  } else if (document.getElementById("visitLocationControl")) {
+    initChecklistLocationMap();
+  }
+}
+
+
+function handleGeolocationError(error) {
+  setStatusMessage(
+    elements.checklistMessage,
+    `Could not get your location: ${error.message || "permission denied."}`,
+    "error"
+  );
+  stopLiveLocationShare();
+}
+
+
+function checkMyLocationExpiry() {
+  if (state.myLocationExpiresAt && Date.now() >= state.myLocationExpiresAt) {
+    stopLiveLocationShare();
+  } else {
+    renderLiveShareBanner();
+  }
+}
+
+
+function stopLiveLocationShare() {
+  if (state.myLocationWatchId !== null) {
+    navigator.geolocation.clearWatch(state.myLocationWatchId);
+    state.myLocationWatchId = null;
+  }
+  if (state.myLocationExpiryTimer) {
+    clearInterval(state.myLocationExpiryTimer);
+    state.myLocationExpiryTimer = null;
+  }
+  state.myLocationExpiresAt = null;
+  state.myLocationTask = null;
+
+  if (state.activeUser && state.liveLocations[state.activeUser.email]) {
+    delete state.liveLocations[state.activeUser.email];
+    saveLiveLocations();
+  }
+
+  renderLiveShareBanner();
+  refreshLocationControlInPlace();
+}
+
+
+function handleLiveShareBannerClick(event) {
+  if (event.target.closest("[data-stop-sharing]")) {
+    stopLiveLocationShare();
+  }
+}
+
+
+function handleAbsenceSubmit(event) {
+  event.preventDefault();
+
+  if (!canManageUsers(state.activeUser)) {
+    setStatusMessage(elements.absenceMessage, "Only admins can mark absences.", "error");
+    return;
+  }
+
+  const employeeName = elements.absenceEmployeeInput.value.trim();
+  const record = findBuddyRecordByEmployee(employeeName);
+  if (!record) {
+    setStatusMessage(elements.absenceMessage, "Select an employee from the buddy list first.", "error");
+    return;
+  }
+
+  const absenceDate = normalizePlannedDate(elements.absenceDateInput.value || todayValue());
+  const reason = elements.absenceReasonSelect.value || "Absent";
+  const key = getAbsenceKey(record.employee, absenceDate);
+
+  state.absences[key] = {
+    employee: record.employee,
+    date: absenceDate,
+    reason,
+  };
+
+  saveAbsences();
+  renderDashboard();
+  setStatusMessage(
+    elements.absenceMessage,
+    `${record.employee} is marked ${reason.toLowerCase()} on ${formatDateValue(absenceDate)}. Buddy coverage is active.`,
+    "success"
+  );
+}
+
+
+function handleCoverageAction(event) {
+  const trigger = event.target.closest("[data-clear-absence]");
+  if (!trigger) {
+    return;
+  }
+
+  if (!canManageUsers(state.activeUser)) {
+    return;
+  }
+
+  const employee = trigger.getAttribute("data-employee");
+  const dateValue = trigger.getAttribute("data-date");
+  delete state.absences[getAbsenceKey(employee, dateValue)];
+  saveAbsences();
+  renderDashboard();
+}
+
+
+function handleAdminTaskAction(event) {
+  const deleteTrigger = event.target.closest("[data-delete-task]");
+  if (deleteTrigger) {
+    handleDeleteTask(deleteTrigger.getAttribute("data-delete-task"));
+    return;
+  }
+
+  const editTrigger = event.target.closest("[data-edit-task]");
+  if (!editTrigger) {
+    return;
+  }
+
+  const taskId = editTrigger.getAttribute("data-edit-task");
+  const task = state.tasks.find((item) => String(item.id) === String(taskId));
+  if (!task) {
+    return;
+  }
+
+  openAssignTaskModal(task);
+}
+
+
+function handleDeleteTask(taskId) {
+  if (!canAssignTasks(state.activeUser)) {
+    window.alert("Only admin users with EA designation can delete tasks.");
+    return;
+  }
+
+  const task = state.tasks.find((item) => String(item.id) === String(taskId));
+  if (!task) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Delete "${task.title}" for ${task.assigneeName}? This cannot be undone.`);
+  if (!confirmed) {
+    return;
+  }
+
+  const requiredDefinition = getRequiredOperationalDefinition(task);
+  if (requiredDefinition) {
+    state.deletedRequiredTaskIds = getDeletedRequiredTaskIds([
+      ...state.deletedRequiredTaskIds,
+      requiredDefinition.taskId || task.taskId || task.id,
+    ]);
+    saveDeletedRequiredTaskIds();
+
+    state.tasks = state.tasks.map((item) =>
+      String(item.id) === String(taskId)
+        ? {
+            ...item,
+            active: false,
+          }
+        : item
+    );
+    saveTasks();
+    renderDashboard();
+    return;
+  }
+
+  state.tasks = state.tasks.filter((item) => String(item.id) !== String(taskId));
+  saveTasks();
+  renderDashboard();
+}
+
+
+function handleDirectorySearch(event) {
+  state.query = event.target.value.trim().toLowerCase();
+  state.userTablePage = 1;
+  renderUserDirectory();
+}
+
+
+function handleRoleFilterChange(event) {
+  state.role = event.target.value;
+  state.userTablePage = 1;
+  renderUserDirectory();
+}
+
+
+function handleDayOffFilterChange(event) {
+  state.dayOff = event.target.value;
+  state.userTablePage = 1;
+  renderUserDirectory();
+}
+
+
+function handleEmployeeTaskFilterChange() {
+  state.employeeTaskPage = 1;
+  renderEmployeeTaskBoard();
+}
+
+
+function handleApprovalsDateChange() {
+  state.approvalsPendingPage = 1;
+  state.approvalsCompletedPage = 1;
+  state.approvalsApprovedPage = 1;
+  renderApprovalsPage();
+}
+
+
+function handleApprovalsTabClick(event) {
+  const trigger = event.target.closest("[data-approvals-tab]");
+  if (!trigger) {
+    return;
+  }
+
+  state.approvalsTab = trigger.getAttribute("data-approvals-tab");
+  renderApprovalsPage();
+  syncLiveMapRefreshTimer();
+}
+
+
+const LIVE_MAP_REFRESH_MS = 10 * 1000;
+
+function syncLiveMapRefreshTimer() {
+  const shouldPoll = state.currentView === "approvals" && state.approvalsTab === "live";
+
+  if (shouldPoll && !state.liveMapRefreshTimer) {
+    state.liveMapRefreshTimer = setInterval(() => {
+      refreshStateFromServer().then(renderApprovalsPage);
+    }, LIVE_MAP_REFRESH_MS);
+  } else if (!shouldPoll && state.liveMapRefreshTimer) {
+    clearInterval(state.liveMapRefreshTimer);
+    state.liveMapRefreshTimer = null;
+  }
+}
+
+
+function handleApprovalsAction(event) {
+  const trigger = event.target.closest("[data-approve-completion]");
+  if (!trigger) {
+    return;
+  }
+
+  const completionKey = trigger.getAttribute("data-approve-completion");
+  const completion = state.completions[completionKey];
+  if (!completion) {
+    return;
+  }
+
+  completion.approvalStatus = "approved";
+  completion.approvedByName = state.activeUser.name;
+  completion.approvedAt = new Date().toISOString();
+
+  saveCompletions();
+  renderApprovalsPage();
+}
+
+
+function handleKamalApprovalAction(event) {
+  const trigger = event.target.closest("[data-kamal-approve-completion]");
+  if (!trigger) {
+    return;
+  }
+
+  const completionKey = trigger.getAttribute("data-kamal-approve-completion");
+  const completion = state.completions[completionKey];
+  if (!completion) {
+    return;
+  }
+
+  completion.kamalApprovalStatus = "approved";
+  completion.kamalApprovedByName = state.activeUser.name;
+  completion.kamalApprovedAt = new Date().toISOString();
+
+  saveCompletions();
+  renderKamalApprovalPanel();
+  renderApprovalsPage();
+}
+
+
+function handleHomeSearch(event) {
+  state.homeSearch = event.target.value.trim().toLowerCase();
+  state.adminBoardPage = 1;
+  renderAdminTaskBoard();
+}
+
+
+function handleAdminDateChange(event) {
+  state.adminDate = event.target.value;
+  state.adminBoardPage = 1;
+  renderAdminTaskBoard();
+}
+
+
+function handleAssignModalBackdropClick(event) {
+  if (event.target === elements.assignTaskModal) {
+    closeAssignTaskModal();
+  }
+}
+
+
+function handleChecklistModalBackdropClick(event) {
+  if (event.target === elements.checklistModal) {
+    closeChecklistModal();
+  }
+}
+
+
+function handleEmployeeTaskAction(event) {
+  const trigger = event.target.closest("[data-complete-task]");
+  if (!trigger) {
+    return;
+  }
+
+  const taskKey = trigger.getAttribute("data-task-key");
+  const task =
+    state.visibleEmployeeTasks.find((item) => getTaskOccurrenceIdentity(item) === taskKey) ||
+    state.visibleWalkinTasks.find((item) => getTaskOccurrenceIdentity(item) === taskKey);
+
+  if (!task || !isTaskCompletionEnabled(task)) {
+    return;
+  }
+
+  openChecklistModal(task);
+}
+
+
+function fillDemoUser() {
+  const demoUser =
+    state.users.find((user) => user.email.toLowerCase() === "asha@modesigns.in") ||
+    state.users.find((user) => user.email.toLowerCase() === "kamal@modesigns.in") ||
+    state.users[0];
+
+  elements.emailInput.value = demoUser.email;
+  elements.rememberMe.checked = true;
+  setStatusMessage(
+    elements.loginMessage,
+    "Demo email inserted — enter that account's password to sign in.",
+    "success"
+  );
+}
+
+
+async function logout() {
+  stopLiveLocationShare();
+
+  const token = getAuthToken();
+  if (token) {
+    try {
+      await fetch(buildApiUrl("/api/logout"), { method: "POST", headers: authHeaders() });
+    } catch (error) {
+      console.error("Could not reach the server to invalidate the session token.", error);
+    }
+  }
+
+  state.activeUser = null;
+  state.currentView = "home";
+  state.isSidebarCollapsed = false;
+  state.activeChecklistTask = null;
+  localStorage.removeItem(STORAGE_KEYS.session);
+  clearAuthToken();
+  closeAssignTaskModal();
+  closeChecklistModal();
+  toggleViews(false);
+  elements.passwordInput.value = "";
+  setStatusMessage(elements.loginMessage, "You have been logged out.", "success");
+}
+
+
+function refreshUserViews() {
+  populateFilters();
+  populateTaskAssigneeOptions();
+  renderDashboard();
+}
+
+
+function syncTaskAssignmentFields() {
+  const selectedUser = resolveTaskAssignee(elements.assignTaskUser.value);
+  if (!selectedUser) {
+    elements.assignTaskDepartment.value = "";
+    elements.assignTaskId.value = "";
+    return;
+  }
+
+  elements.assignTaskDepartment.value = getDepartmentLabel(selectedUser);
+  elements.assignTaskPlanned.value = normalizePlannedDate(
+    elements.assignTaskPlanned.value || DEFAULT_TASK_START_DATE
+  );
+  elements.assignTaskId.value = elements.assignTaskId.value || createTaskCode(selectedUser);
+  elements.assignTaskUser.value = formatTaskAssigneeOption(selectedUser);
+}
+
+
+function openAssignTaskModal(taskToEdit = null) {
+  if (!canAssignTasks(state.activeUser)) {
+    return;
+  }
+
+  elements.assignTaskForm.reset();
+  elements.assignTaskMessage.textContent = "";
+  populateTaskAssigneeOptions();
+
+  if (taskToEdit) {
+    state.editingTaskId = taskToEdit.id;
+    const assignee = state.users.find((user) => user.email.toLowerCase() === taskToEdit.assigneeEmail.toLowerCase());
+    elements.assignTaskModalTitle.textContent = "Edit employee task";
+    elements.assignTaskSubmitButton.textContent = "Save changes";
+    elements.assignTaskUser.value = assignee ? formatTaskAssigneeOption(assignee) : taskToEdit.assigneeName;
+    elements.assignTaskTitle.value = taskToEdit.title;
+    elements.assignTaskFrequency.value = getTaskDisplayFrequency(taskToEdit);
+    elements.assignTaskDepartment.value = taskToEdit.department;
+    elements.assignTaskPlanned.value = normalizePlannedDate(taskToEdit.plannedDate || todayValue());
+    elements.assignTaskId.value = taskToEdit.taskId || taskToEdit.id;
+    elements.assignTaskDetails.value = taskToEdit.details || "";
+  } else {
+    state.editingTaskId = null;
+    elements.assignTaskModalTitle.textContent = "Create task for employee dashboard";
+    elements.assignTaskSubmitButton.textContent = "Submit task";
+    elements.assignTaskFrequency.value = "daily";
+    elements.assignTaskPlanned.value = DEFAULT_TASK_START_DATE;
+    elements.assignTaskId.value = "";
+    syncTaskAssignmentFields();
+  }
+
+  elements.assignTaskModal.classList.remove("hidden");
+  elements.assignTaskModal.setAttribute("aria-hidden", "false");
+}
+
+
+function closeAssignTaskModal() {
+  state.editingTaskId = null;
+  elements.assignTaskModalTitle.textContent = "Create task for employee dashboard";
+  elements.assignTaskSubmitButton.textContent = "Submit task";
+  elements.assignTaskModal.classList.add("hidden");
+  elements.assignTaskModal.setAttribute("aria-hidden", "true");
+}
+
+
+function openChecklistModal(task) {
+  state.activeChecklistTask = task;
+  state.activeGeneratorUnit = null;
+  state.activeCashHandlingShift = null;
+  state.activeMeterReadingLocation = null;
+  state.activeEarthingCleaningLocation = null;
+  state.pantryFormLocation = null;
+  elements.checklistForm.reset();
+  elements.checklistMessage.textContent = "";
+  elements.checklistSubmitRow.classList.remove("hidden");
+  const slotLabel = task.occurrenceSlotLabel ? ` | ${task.occurrenceSlotLabel}` : "";
+  elements.checklistTaskMeta.textContent = `${task.assigneeName} | ${formatDateValue(task.occurrenceDate)}${slotLabel} | Task ID ${task.taskId || task.id}`;
+
+  if (isPantryTask(task)) {
+    elements.checklistTaskTitle.textContent = "PANTRY CHECKLIST";
+    renderPantryLocationPicker();
+  } else if (isSiteVisitTask(task)) {
+    elements.checklistTaskTitle.textContent = SITE_VISIT_TITLE;
+    renderVisitPicker(task);
+  } else if (isGeneratorChecklistTask(task)) {
+    const template = getChecklistTemplate(task);
+    elements.checklistTaskTitle.textContent = template.title;
+    renderGeneratorPicker(task);
+  } else if (isCashHandlingChecklistTask(task)) {
+    const template = getChecklistTemplate(task);
+    elements.checklistTaskTitle.textContent = template.title;
+    renderCashHandlingPicker(task);
+  } else if (isMeterReadingChecklistTask(task)) {
+    const template = getChecklistTemplate(task);
+    elements.checklistTaskTitle.textContent = template.title;
+    renderMeterReadingPicker(task);
+  } else if (isEarthingCleaningTask(task)) {
+    const template = getChecklistTemplate(task);
+    elements.checklistTaskTitle.textContent = template.title;
+    renderEarthingCleaningPicker(task);
+  } else {
+    const template = getChecklistTemplate(task);
+    elements.checklistTaskTitle.textContent = template.title;
+    renderChecklistFields(template);
+  }
+
+  elements.checklistModal.classList.remove("hidden");
+  elements.checklistModal.setAttribute("aria-hidden", "false");
+  autoFillVehicleFieldsFromLoginEmail(task);
+}
+
+
+function closeChecklistModal() {
+  destroyChecklistMap();
+  state.activeChecklistTask = null;
+  state.activeGeneratorUnit = null;
+  state.activeCashHandlingShift = null;
+  state.activeMeterReadingLocation = null;
+  state.activeEarthingCleaningLocation = null;
+  state.pantryFormLocation = null;
+  elements.checklistModal.classList.add("hidden");
+  elements.checklistModal.setAttribute("aria-hidden", "true");
+}
+
+
+function getCheckboxQuestionAnswer(question) {
+  const yesInput = document.getElementById(`question-${question.id}-yes`);
+  const noInput = document.getElementById(`question-${question.id}-no`);
+  if (yesInput?.checked) {
+    return "Yes";
+  }
+  if (noInput?.checked) {
+    return "No";
+  }
+  return "";
+}
+
+
+function collectChecklistResponses(template) {
+  const responses = {};
+  template.questions.forEach((question) => {
+    if (question.type === "checkbox") {
+      const answer = getCheckboxQuestionAnswer(question);
+      responses[question.id] = answer;
+      if (question.followUpOnNo) {
+        const followUpField = document.getElementById(`question-${question.id}-followup`);
+        responses[question.followUpOnNo.id] = answer === "No" ? followUpField?.value || "" : "";
+      }
+      return;
+    }
+
+    const field = elements.checklistForm.elements.namedItem(question.id);
+    if (!field) {
+      return;
+    }
+
+    if (question.type === "file" || question.type === "photo") {
+      responses[question.id] = [...field.files].map((file) => file.name);
+      return;
+    }
+
+    responses[question.id] = field.value;
+  });
+
+  return responses;
+}
+
+
+function collectCashDenominationRows() {
+  return [...elements.checklistFields.querySelectorAll(".cash-denom-input")].map((input) => {
+    const denomination = Number(input.getAttribute("data-cash-denom"));
+    const notes = Number(input.value) || 0;
+    return { denomination, notes, amount: denomination * notes };
+  });
+}
+
+
+function setHomeDefaults() {
+  elements.dashboardDateInput.value = state.adminDate;
+  elements.dateRangeSelect.value = "today";
+  elements.taskSelect.value = "all";
+  if (elements.absenceDateInput) {
+    elements.absenceDateInput.value = todayValue();
+  }
+}
+
+
+function restoreSession() {
+  const token = getAuthToken();
+  const savedEmail = localStorage.getItem(STORAGE_KEYS.session);
+  if (!savedEmail || !token) {
+    if (!token) {
+      localStorage.removeItem(STORAGE_KEYS.session);
+    }
+    toggleViews(false);
+    return;
+  }
+
+  const matchedUser = state.users.find((user) => user.email === savedEmail);
+  if (!matchedUser) {
+    localStorage.removeItem(STORAGE_KEYS.session);
+    toggleViews(false);
+    return;
+  }
+
+  state.activeUser = matchedUser;
+  state.currentView = allowedView(state.currentView);
+  toggleViews(true);
+}
+
+
+function restoreRememberedEmail() {
+  const rememberedEmail = localStorage.getItem(STORAGE_KEYS.rememberedEmail);
+  if (!rememberedEmail) {
+    return;
+  }
+
+  elements.emailInput.value = rememberedEmail;
+  elements.rememberMe.checked = true;
+}
+
+
+function setCurrentView(view) {
+  state.currentView = allowedView(view);
+  window.location.hash = state.currentView;
+  if (state.currentView === "approvals") {
+    elements.approvalsDateInput.value = todayValue();
+  }
+  // Switch instantly using whatever is already cached, so navigation never
+  // feels blocked on the network — then pull the latest data from the
+  // server and re-render, so every tab click reflects real server state
+  // rather than a stale in-memory copy from page load.
+  renderDashboard();
+  refreshStateFromServer().then(renderDashboard);
+  syncLiveMapRefreshTimer();
+}
+
+
+function allowedView(view) {
+  if (view === "buddy") {
+    return "buddy";
+  }
+  if (view === "users" && canManageUsers(state.activeUser)) {
+    return "users";
+  }
+  if (view === "approvals" && canAssignTasks(state.activeUser)) {
+    return "approvals";
+  }
+  return "home";
+}
+
+
+function enforceAllowedView() {
+  const safeView = allowedView(state.currentView);
+  if (safeView !== state.currentView) {
+    state.currentView = safeView;
+    window.location.hash = safeView;
+  }
+}
+
+
+function toggleSidebar() {
+  state.isSidebarCollapsed = !state.isSidebarCollapsed;
+  renderSidebarState();
+}
+
+
+function collapseSidebar() {
+  state.isSidebarCollapsed = true;
+  renderSidebarState();
+}

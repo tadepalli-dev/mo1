@@ -1,0 +1,14 @@
+{
+  "name": "motrack-user-management",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MoTrack user management demo",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env server.js",
+    "start": "node --env-file-if-exists=.env server.js",
+    "sync-sheets": "node scripts/sync-to-sheets.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.2.0"
+  }
+}
