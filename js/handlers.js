@@ -6,6 +6,19 @@ function handleGlobalClick(event) {
     openAssignTaskModal();
     return;
   }
+
+  const passwordToggle = event.target.closest("[data-password-toggle]");
+  if (passwordToggle) {
+    const input = document.getElementById(passwordToggle.getAttribute("data-password-toggle"));
+    if (!input) {
+      return;
+    }
+    const isHidden = input.type === "password";
+    input.type = isHidden ? "text" : "password";
+    passwordToggle.textContent = isHidden ? "🙈" : "👁";
+    passwordToggle.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+    return;
+  }
 }
 
 async function autoFillVehicleFieldsFromLoginEmail(task) {
@@ -108,6 +121,59 @@ async function handleLogin(event) {
 }
 
 
+function openForgotPasswordModal() {
+  elements.forgotPasswordForm.reset();
+  elements.forgotPasswordMessage.textContent = "";
+  elements.forgotPasswordEmail.value = elements.emailInput.value.trim();
+  elements.forgotPasswordModal.classList.remove("hidden");
+  elements.forgotPasswordModal.setAttribute("aria-hidden", "false");
+}
+
+
+function closeForgotPasswordModal() {
+  elements.forgotPasswordModal.classList.add("hidden");
+  elements.forgotPasswordModal.setAttribute("aria-hidden", "true");
+}
+
+
+function handleForgotPasswordModalBackdropClick(event) {
+  if (event.target === elements.forgotPasswordModal) {
+    closeForgotPasswordModal();
+  }
+}
+
+
+async function handleForgotPasswordSubmit(event) {
+  event.preventDefault();
+
+  const email = elements.forgotPasswordEmail.value.trim().toLowerCase();
+  setStatusMessage(elements.forgotPasswordMessage, "Sending request…", "");
+
+  let result;
+  try {
+    const response = await fetch(buildApiUrl("/api/forgot-password"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    result = await response.json();
+  } catch (error) {
+    setStatusMessage(elements.forgotPasswordMessage, "Could not reach the server. Try again.", "error");
+    return;
+  }
+
+  if (!result.ok) {
+    const messages = {
+      not_found: "This email is not in the MoTrack user list.",
+    };
+    setStatusMessage(elements.forgotPasswordMessage, messages[result.reason] || "Could not submit the request.", "error");
+    return;
+  }
+
+  setStatusMessage(elements.forgotPasswordMessage, "Request sent. Asha will reset your password shortly.", "success");
+}
+
+
 function handleAddUser(event) {
   event.preventDefault();
 
@@ -137,6 +203,105 @@ function handleAddUser(event) {
 }
 
 
+function openChangePasswordModal() {
+  elements.changePasswordForm.reset();
+  elements.changePasswordMessage.textContent = "";
+  elements.changePasswordModal.classList.remove("hidden");
+  elements.changePasswordModal.setAttribute("aria-hidden", "false");
+}
+
+
+function closeChangePasswordModal() {
+  elements.changePasswordModal.classList.add("hidden");
+  elements.changePasswordModal.setAttribute("aria-hidden", "true");
+}
+
+
+function handleChangePasswordModalBackdropClick(event) {
+  if (event.target === elements.changePasswordModal) {
+    closeChangePasswordModal();
+  }
+}
+
+
+function handleChangePasswordSubmit(event) {
+  event.preventDefault();
+
+  if (!state.activeUser) {
+    setStatusMessage(elements.changePasswordMessage, "You must be signed in to change your password.", "error");
+    return;
+  }
+
+  const newPassword = elements.newPasswordInput.value.trim();
+  const confirmPassword = elements.confirmNewPasswordInput.value.trim();
+
+  if (newPassword.length < 6) {
+    setStatusMessage(elements.changePasswordMessage, "Password must be at least 6 characters.", "error");
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setStatusMessage(elements.changePasswordMessage, "Passwords do not match.", "error");
+    return;
+  }
+
+  const activeEmail = state.activeUser.email.toLowerCase();
+  const userRecord = state.users.find((user) => user.email.toLowerCase() === activeEmail);
+  if (!userRecord) {
+    setStatusMessage(elements.changePasswordMessage, "Could not find your account. Try signing in again.", "error");
+    return;
+  }
+
+  userRecord.password = newPassword;
+  saveUsers();
+  setStatusMessage(elements.changePasswordMessage, "Password updated.", "success");
+  elements.changePasswordForm.reset();
+}
+
+
+function handlePasswordResetAction(event) {
+  const trigger = event.target.closest("[data-resolve-reset-request]");
+  if (!trigger) {
+    return;
+  }
+
+  const email = trigger.getAttribute("data-resolve-reset-request").toLowerCase();
+  const inputId = trigger.getAttribute("data-reset-input");
+  const input = document.getElementById(inputId);
+  const newPassword = input?.value.trim() || "";
+
+  if (newPassword.length < 6) {
+    input?.focus();
+    return;
+  }
+
+  const userRecord = state.users.find((user) => user.email.toLowerCase() === email);
+  if (!userRecord) {
+    return;
+  }
+
+  userRecord.password = newPassword;
+  saveUsers();
+
+  const request = state.passwordResetRequests.find(
+    (item) => String(item.email || "").toLowerCase() === email && !item.resolvedAt
+  );
+  if (request) {
+    request.resolvedAt = new Date().toISOString();
+    request.resolvedByName = state.activeUser?.name || "Admin";
+  }
+  persistCollection("passwordResetRequests", state.passwordResetRequests);
+
+  renderPasswordResetRequestsPanel();
+}
+
+
+function handlePantryAlertsToggle() {
+  state.pantryAlertsExpanded = !state.pantryAlertsExpanded;
+  renderPantryAlertsPanel();
+}
+
+
 function handleToggleAddUserForm() {
   const isHidden = elements.addUserForm.classList.toggle("hidden");
   elements.toggleAddUserForm.textContent = isHidden ? "+ Add user" : "✕ Close";
@@ -163,11 +328,13 @@ function handleAssignTask(event) {
     elements.assignTaskPlanned.value || DEFAULT_TASK_START_DATE
   );
   const frequency = normalizeFrequency(elements.assignTaskFrequency.value);
+  const sequenceInput = elements.assignTaskSequence.value.trim();
   const task = normalizeTask({
     id: state.editingTaskId || elements.assignTaskId.value.trim(),
     taskId: elements.assignTaskId.value.trim(),
     title: elements.assignTaskTitle.value.trim(),
     frequency,
+    sequence: sequenceInput ? Number(sequenceInput) : undefined,
     department: elements.assignTaskDepartment.value.trim(),
     plannedDate,
     validUntil: calculateValidUntil(plannedDate, frequency),
@@ -274,8 +441,16 @@ function handleChecklistSubmit(event) {
   }
 
   const responses = collectChecklistResponses(template);
+
+  const fuelValidation = validateFuelChecklistSubmission(state.activeChecklistTask, responses);
+  if (!fuelValidation.ok) {
+    setStatusMessage(elements.checklistMessage, fuelValidation.message, "error");
+    return;
+  }
+
   const completionKey = getCompletionKey(state.activeChecklistTask);
   const submittedAt = new Date().toISOString();
+  const fuelRoute = getFuelApprovalRoute(state.activeChecklistTask, responses);
 
   state.completions[completionKey] = {
     taskId: state.activeChecklistTask.taskId || state.activeChecklistTask.id,
@@ -286,6 +461,10 @@ function handleChecklistSubmit(event) {
     responses,
     approvalStatus: "pending",
     ...(requiresKamalPreApproval(state.activeChecklistTask) ? { kamalApprovalStatus: "pending" } : {}),
+    ...(requiresArunPreApproval(state.activeChecklistTask) ? { arunApprovalStatus: "pending" } : {}),
+    ...(fuelRoute ? { fuelMileage: fuelRoute.mileage, fuelMileageThreshold: fuelRoute.threshold } : {}),
+    ...(fuelRoute?.route === "cashier" ? { cashierApprovalStatus: "pending" } : {}),
+    ...(fuelRoute?.route === "hr" ? { hrApprovalStatus: "pending" } : {}),
   };
 
   saveCompletions();
@@ -348,14 +527,46 @@ function exportChecklistSubmissionToSheet(task, responses, submittedAt) {
 // is a fire-and-forget side effect — it never blocks or surfaces errors in
 // the checklist flow, since the report is a secondary record, not the source
 // of truth (state.completions is).
+// The server computes the audit rows itself (from the store's own tasks and
+// completions — see lib/submission-audit.js) rather than trusting whatever
+// this browser posts, so every sync reflects the currently-deployed logic
+// no matter how stale this particular tab is.
 function syncSubmissionReport() {
   fetch(buildApiUrl("/api/submission-report-sync"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ rows: buildSubmissionAuditRows() }),
   }).catch((error) => {
     console.error("Could not sync the submission report.", error);
   });
+}
+
+
+// Same rewrite as syncSubmissionReport, but user-triggered with visible
+// feedback — for forcing a fresh copy on demand instead of waiting for the
+// next checklist submission (the only thing that normally fires the rewrite).
+async function handleResyncSubmissionReport() {
+  setStatusMessage(elements.resyncSubmissionReportMessage, "Rewriting the sheet…", "");
+  elements.resyncSubmissionReportButton.disabled = true;
+
+  try {
+    const response = await fetch(buildApiUrl("/api/submission-report-sync"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+    });
+    const result = await response.json();
+    if (!response.ok || result.ok === false) {
+      throw new Error(result.error || "The server rejected the sync.");
+    }
+    setStatusMessage(
+      elements.resyncSubmissionReportMessage,
+      `Sheet updated — ${result.rowCount ?? "all"} rows written.`,
+      "success"
+    );
+  } catch (error) {
+    setStatusMessage(elements.resyncSubmissionReportMessage, `Could not resync: ${error.message}`, "error");
+  } finally {
+    elements.resyncSubmissionReportButton.disabled = false;
+  }
 }
 
 
@@ -1067,6 +1278,13 @@ function handleDirectorySearch(event) {
 }
 
 
+function handleContactsSearch(event) {
+  state.contactsQuery = event.target.value.trim().toLowerCase();
+  state.contactsPage = 1;
+  renderContactDirectory();
+}
+
+
 function handleRoleFilterChange(event) {
   state.role = event.target.value;
   state.userTablePage = 1;
@@ -1090,8 +1308,14 @@ function handleEmployeeTaskFilterChange() {
 function handleApprovalsDateChange() {
   state.approvalsPendingPage = 1;
   state.approvalsCompletedPage = 1;
+  state.approvalsNotCompletedPage = 1;
   state.approvalsApprovedPage = 1;
   renderApprovalsPage();
+}
+
+
+function handleComplianceDateChange() {
+  renderCompliancePage();
 }
 
 
@@ -1156,12 +1380,60 @@ function handleKamalApprovalAction(event) {
     return;
   }
 
-  completion.kamalApprovalStatus = "approved";
+  if (completion.hrApprovalStatus === "pending") {
+    completion.hrApprovalStatus = "approved";
+  } else {
+    completion.kamalApprovalStatus = "approved";
+  }
   completion.kamalApprovedByName = state.activeUser.name;
   completion.kamalApprovedAt = new Date().toISOString();
 
   saveCompletions();
   renderKamalApprovalPanel();
+  renderApprovalsPage();
+}
+
+
+function handleDilipApprovalAction(event) {
+  const trigger = event.target.closest("[data-dilip-approve-completion]");
+  if (!trigger) {
+    return;
+  }
+
+  const completionKey = trigger.getAttribute("data-dilip-approve-completion");
+  const completion = state.completions[completionKey];
+  if (!completion) {
+    return;
+  }
+
+  completion.cashierApprovalStatus = "approved";
+  completion.cashierApprovedByName = state.activeUser.name;
+  completion.cashierApprovedAt = new Date().toISOString();
+
+  saveCompletions();
+  renderDilipApprovalPanel();
+  renderApprovalsPage();
+}
+
+
+function handleArunApprovalAction(event) {
+  const trigger = event.target.closest("[data-arun-approve-completion]");
+  if (!trigger) {
+    return;
+  }
+
+  const completionKey = trigger.getAttribute("data-arun-approve-completion");
+  const completion = state.completions[completionKey];
+  if (!completion) {
+    return;
+  }
+
+  completion.arunApprovalStatus = "approved";
+  completion.arunApprovedByName = state.activeUser.name;
+  completion.arunApprovedAt = new Date().toISOString();
+
+  saveCompletions();
+  renderArunApprovalPanel();
   renderApprovalsPage();
 }
 
@@ -1194,6 +1466,13 @@ function handleChecklistModalBackdropClick(event) {
 }
 
 
+function handleNotCompletedModalBackdropClick(event) {
+  if (event.target === elements.notCompletedModal) {
+    closeNotCompletedModal();
+  }
+}
+
+
 function handleEmployeeTaskAction(event) {
   const trigger = event.target.closest("[data-complete-task]");
   if (!trigger) {
@@ -1213,19 +1492,33 @@ function handleEmployeeTaskAction(event) {
 }
 
 
-function fillDemoUser() {
-  const demoUser =
-    state.users.find((user) => user.email.toLowerCase() === "asha@modesigns.in") ||
-    state.users.find((user) => user.email.toLowerCase() === "kamal@modesigns.in") ||
-    state.users[0];
+function handleEmployeeStatusSelectChange(event) {
+  const select = event.target.closest("[data-status-select]");
+  if (!select) {
+    return;
+  }
 
-  elements.emailInput.value = demoUser.email;
-  elements.rememberMe.checked = true;
-  setStatusMessage(
-    elements.loginMessage,
-    "Demo email inserted — enter that account's password to sign in.",
-    "success"
-  );
+  const taskKey = select.getAttribute("data-task-key");
+  const task =
+    state.visibleEmployeeTasks.find((item) => getTaskOccurrenceIdentity(item) === taskKey) ||
+    state.visibleWalkinTasks.find((item) => getTaskOccurrenceIdentity(item) === taskKey);
+
+  const value = select.value;
+  // Reset immediately rather than waiting on a re-render — completed opens a
+  // modal that may be cancelled, and not_completed's own modal can likewise
+  // be cancelled, in which case there'd be no re-render to put this back to
+  // the placeholder otherwise.
+  select.value = "";
+
+  if (!task || !isTaskCompletionEnabled(task)) {
+    return;
+  }
+
+  if (value === "completed") {
+    openChecklistModal(task);
+  } else if (value === "not_completed") {
+    openNotCompletedModal(task);
+  }
 }
 
 
@@ -1299,6 +1592,7 @@ function openAssignTaskModal(taskToEdit = null) {
     elements.assignTaskDepartment.value = taskToEdit.department;
     elements.assignTaskPlanned.value = normalizePlannedDate(taskToEdit.plannedDate || todayValue());
     elements.assignTaskId.value = taskToEdit.taskId || taskToEdit.id;
+    elements.assignTaskSequence.value = Number.isFinite(taskToEdit.sequence) ? taskToEdit.sequence : "";
     elements.assignTaskDetails.value = taskToEdit.details || "";
   } else {
     state.editingTaskId = null;
@@ -1381,6 +1675,57 @@ function closeChecklistModal() {
   state.pantryFormLocation = null;
   elements.checklistModal.classList.add("hidden");
   elements.checklistModal.setAttribute("aria-hidden", "true");
+}
+
+
+function openNotCompletedModal(task) {
+  state.activeNotCompletedTask = task;
+  elements.notCompletedForm.reset();
+  elements.notCompletedMessage.textContent = "";
+  elements.notCompletedTaskTitle.textContent = getTaskDisplayTitle(task);
+  elements.notCompletedModal.classList.remove("hidden");
+  elements.notCompletedModal.setAttribute("aria-hidden", "false");
+}
+
+
+function closeNotCompletedModal() {
+  state.activeNotCompletedTask = null;
+  elements.notCompletedModal.classList.add("hidden");
+  elements.notCompletedModal.setAttribute("aria-hidden", "true");
+}
+
+
+function handleNotCompletedSubmit(event) {
+  event.preventDefault();
+
+  const task = state.activeNotCompletedTask;
+  if (!task) {
+    setStatusMessage(elements.notCompletedMessage, "No task is selected.", "error");
+    return;
+  }
+
+  const remarks = elements.notCompletedRemarks.value.trim();
+  if (!remarks) {
+    setStatusMessage(elements.notCompletedMessage, "Add a remark before submitting.", "error");
+    return;
+  }
+
+  const completionKey = getCompletionKey(task);
+  state.completions[completionKey] = {
+    taskId: task.taskId || task.id,
+    occurrenceDate: task.occurrenceDate,
+    occurrenceSlot: task.occurrenceSlot || null,
+    occurrenceSlotLabel: task.occurrenceSlotLabel || "",
+    submittedAt: new Date().toISOString(),
+    status: "not_completed",
+    remarks,
+    approvalStatus: "pending",
+  };
+
+  saveCompletions();
+  closeNotCompletedModal();
+  renderEmployeeTaskBoard();
+  renderApprovalsPage();
 }
 
 
@@ -1487,6 +1832,9 @@ function setCurrentView(view) {
   if (state.currentView === "approvals") {
     elements.approvalsDateInput.value = todayValue();
   }
+  if (state.currentView === "home") {
+    state.employeeTaskPage = 1;
+  }
   // Switch instantly using whatever is already cached, so navigation never
   // feels blocked on the network — then pull the latest data from the
   // server and re-render, so every tab click reflects real server state
@@ -1501,11 +1849,17 @@ function allowedView(view) {
   if (view === "buddy") {
     return "buddy";
   }
+  if (view === "contacts") {
+    return "contacts";
+  }
   if (view === "users" && canManageUsers(state.activeUser)) {
     return "users";
   }
   if (view === "approvals" && canAssignTasks(state.activeUser)) {
     return "approvals";
+  }
+  if (view === "compliance" && canAssignTasks(state.activeUser)) {
+    return "compliance";
   }
   return "home";
 }

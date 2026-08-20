@@ -8,8 +8,14 @@ function getInitialView() {
   if (hash === "approvals") {
     return "approvals";
   }
+  if (hash === "compliance") {
+    return "compliance";
+  }
   if (hash === "buddy") {
     return "buddy";
+  }
+  if (hash === "contacts") {
+    return "contacts";
   }
   return "home";
 }
@@ -338,6 +344,13 @@ function getTaskReferenceDate(task) {
 }
 
 
+// Tasks without a sequence sort after any that have one, keeping their
+// relative order (stable sort) instead of interleaving with sequenced tasks.
+function getTaskSequenceValue(task) {
+  return Number.isFinite(task.sequence) ? task.sequence : Infinity;
+}
+
+
 function toDateValue(value) {
   if (!value) {
     return "";
@@ -432,4 +445,86 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+
+// Wires a mic button to a textarea using the browser's built-in speech
+// recognition (Chrome/Edge only — no server-side transcription involved).
+// Spoken words are typed into the field live; each finalized phrase is kept,
+// with the in-progress phrase shown until it's finalized or corrected.
+function setupVoiceInput(button, textarea, statusElement) {
+  if (!button || !textarea) {
+    return;
+  }
+
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognitionCtor) {
+    button.disabled = true;
+    button.title = "Voice input isn't supported in this browser.";
+    if (statusElement) {
+      statusElement.textContent = "Voice input isn't supported in this browser — try Chrome or Edge.";
+    }
+    return;
+  }
+
+  const recognizer = new SpeechRecognitionCtor();
+  recognizer.continuous = true;
+  recognizer.interimResults = true;
+  recognizer.lang = "en-IN";
+
+  let isRecording = false;
+  let baseText = "";
+
+  const setRecordingState = (recording) => {
+    isRecording = recording;
+    button.classList.toggle("is-recording", recording);
+    button.setAttribute("aria-label", recording ? "Stop recording" : "Record a voice note");
+    if (statusElement) {
+      statusElement.textContent = recording ? "Listening… speak now." : "";
+    }
+  };
+
+  recognizer.onresult = (event) => {
+    let interim = "";
+    let final = "";
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      const transcript = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        final += transcript;
+      } else {
+        interim += transcript;
+      }
+    }
+    if (final) {
+      baseText = `${baseText}${baseText && !baseText.endsWith(" ") ? " " : ""}${final.trim()} `;
+    }
+    textarea.value = `${baseText}${interim}`;
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  recognizer.onerror = (event) => {
+    setRecordingState(false);
+    if (statusElement && event.error !== "aborted") {
+      statusElement.textContent = "Couldn't access the microphone. Check browser permissions and try again.";
+    }
+  };
+
+  recognizer.onend = () => {
+    setRecordingState(false);
+  };
+
+  button.addEventListener("click", () => {
+    if (isRecording) {
+      recognizer.stop();
+      return;
+    }
+    baseText = textarea.value.trim() ? `${textarea.value.trim()} ` : "";
+    try {
+      recognizer.start();
+      setRecordingState(true);
+    } catch (error) {
+      // start() throws if a recognition session is already active elsewhere
+      // in the page — safe to ignore, the existing session keeps running.
+    }
+  });
 }

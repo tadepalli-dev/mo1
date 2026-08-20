@@ -13,8 +13,11 @@ function renderDashboard() {
   renderHomeDashboard();
   renderStats();
   renderUserDirectory();
+  renderPasswordResetRequestsPanel();
   renderApprovalsPage();
+  renderCompliancePage();
   renderBuddyPage();
+  renderContactDirectory();
   renderLiveShareBanner();
 }
 
@@ -41,6 +44,9 @@ function renderHomeDashboard() {
 
   renderPantryAlertsPanel();
   renderKamalApprovalPanel();
+  renderKamalFuelRequestsPanel();
+  renderDilipApprovalPanel();
+  renderArunApprovalPanel();
   renderBuddyCoverageBanner();
 }
 
@@ -172,12 +178,18 @@ function renderPantryAlertsPanel() {
 
   if (!alerts.length) {
     elements.pantryAlertsBoard.append(createEmptyState("No pantry quantity mismatches have been reported."));
-    return;
+  } else {
+    alerts.forEach((alert) => {
+      elements.pantryAlertsBoard.append(createPantryAlertCard(alert));
+    });
   }
 
-  alerts.forEach((alert) => {
-    elements.pantryAlertsBoard.append(createPantryAlertCard(alert));
-  });
+  // Expanding pantry alerts takes over the whole admin dashboard rather than
+  // living alongside the task board — re-applied on every render (not just
+  // on toggle) so a background data refresh never snaps an open panel shut.
+  elements.pantryAlertsToggle.setAttribute("aria-expanded", String(state.pantryAlertsExpanded));
+  elements.pantryAlertsBoard.classList.toggle("hidden", !state.pantryAlertsExpanded);
+  elements.adminDashboardMain?.classList.toggle("hidden", state.pantryAlertsExpanded);
 }
 
 
@@ -220,7 +232,7 @@ function renderKamalApprovalPanel() {
   elements.kamalApprovalBoard.innerHTML = "";
 
   if (!pendingEntries.length) {
-    elements.kamalApprovalBoard.append(createEmptyState("No AC filter cleaning checklists are waiting for your approval."));
+    elements.kamalApprovalBoard.append(createEmptyState("No checklists are waiting for your approval."));
     return;
   }
 
@@ -231,6 +243,106 @@ function renderKamalApprovalPanel() {
 
 
 function createKamalApprovalCard(entry) {
+  const { completion, task } = entry;
+  const isHrFuelFlag = completion.hrApprovalStatus === "pending";
+  const card = document.createElement("article");
+  card.className = "task-card task-card--alert";
+  card.innerHTML = `
+    <div class="task-card__top">
+      <div>
+        <strong>${escapeHtml(getTaskDisplayTitle(task))}</strong>
+      </div>
+      <span class="task-badge task-badge--alert">${isHrFuelFlag ? "Contact HR" : "Awaiting your approval"}</span>
+    </div>
+    <div class="task-card__meta">
+      <span>Submitted by ${escapeHtml(task.assigneeName)} · Task ID ${escapeHtml(task.taskId || task.id)}</span>
+      <span>${escapeHtml(formatDateValue(completion.occurrenceDate))}</span>
+      ${
+        isHrFuelFlag && Number.isFinite(completion.fuelMileage)
+          ? `<span>Mileage ${escapeHtml(completion.fuelMileage.toFixed(1))} km/l — at or below the ${escapeHtml(String(completion.fuelMileageThreshold ?? "-"))} km/l threshold</span>`
+          : ""
+      }
+    </div>
+    <button type="button" class="button button--primary" data-kamal-approve-completion="${escapeHtml(entry.key)}">Approve</button>
+  `;
+  return card;
+}
+
+
+function renderDilipApprovalPanel() {
+  if (!elements.dilipApprovalSection) {
+    return;
+  }
+
+  const isDilip = state.activeUser?.email?.toLowerCase() === "dilip.gupta@curtainsandcarpets.com";
+  elements.dilipApprovalSection.classList.toggle("hidden", !isDilip);
+  if (!isDilip) {
+    return;
+  }
+
+  const pendingEntries = getPendingCashierApprovalEntries();
+  elements.dilipApprovalMeta.textContent = `${pendingEntries.length} fuel request${pendingEntries.length === 1 ? "" : "s"} awaiting your approval`;
+  elements.dilipApprovalBoard.innerHTML = "";
+
+  if (!pendingEntries.length) {
+    elements.dilipApprovalBoard.append(createEmptyState("No fuel requests are waiting for your approval."));
+    return;
+  }
+
+  pendingEntries.forEach((entry) => {
+    elements.dilipApprovalBoard.append(createDilipApprovalCard(entry));
+  });
+}
+
+
+function createDilipApprovalCard(entry) {
+  const { completion, task } = entry;
+  const card = document.createElement("article");
+  card.className = "task-card task-card--alert";
+  card.innerHTML = `
+    <div class="task-card__top">
+      <div>
+        <strong>${escapeHtml(task.assigneeName)}</strong>
+      </div>
+      <span class="task-badge task-badge--alert">Awaiting your approval</span>
+    </div>
+    <div class="task-card__meta">
+      <span>Vehicle ${escapeHtml(completion.responses?.vehicle_number || "-")} · Fuel ${escapeHtml(String(completion.responses?.fuel_amount ?? "-"))} L</span>
+      <span>Mileage ${escapeHtml(Number.isFinite(completion.fuelMileage) ? completion.fuelMileage.toFixed(1) : "-")} km/l (threshold ${escapeHtml(String(completion.fuelMileageThreshold ?? "-"))}) · ${escapeHtml(formatDateValue(completion.occurrenceDate))}</span>
+    </div>
+    <button type="button" class="button button--primary" data-dilip-approve-completion="${escapeHtml(entry.key)}">Approve</button>
+  `;
+  return card;
+}
+
+
+function renderArunApprovalPanel() {
+  if (!elements.arunApprovalSection) {
+    return;
+  }
+
+  const isArun = state.activeUser?.email?.toLowerCase() === "arunmishra@modesigns.in";
+  elements.arunApprovalSection.classList.toggle("hidden", !isArun);
+  if (!isArun) {
+    return;
+  }
+
+  const pendingEntries = getPendingArunApprovalEntries();
+  elements.arunApprovalMeta.textContent = `${pendingEntries.length} checklist${pendingEntries.length === 1 ? "" : "s"} awaiting your review`;
+  elements.arunApprovalBoard.innerHTML = "";
+
+  if (!pendingEntries.length) {
+    elements.arunApprovalBoard.append(createEmptyState("No checklists are waiting for your review."));
+    return;
+  }
+
+  pendingEntries.forEach((entry) => {
+    elements.arunApprovalBoard.append(createArunApprovalCard(entry));
+  });
+}
+
+
+function createArunApprovalCard(entry) {
   const { completion, task } = entry;
   const card = document.createElement("article");
   card.className = "task-card task-card--alert";
@@ -245,7 +357,52 @@ function createKamalApprovalCard(entry) {
       <span>Submitted by ${escapeHtml(task.assigneeName)} · Task ID ${escapeHtml(task.taskId || task.id)}</span>
       <span>${escapeHtml(formatDateValue(completion.occurrenceDate))}</span>
     </div>
-    <button type="button" class="button button--primary" data-kamal-approve-completion="${escapeHtml(entry.key)}">Approve</button>
+    <button type="button" class="button button--primary" data-arun-approve-completion="${escapeHtml(entry.key)}">Approve</button>
+  `;
+  return card;
+}
+
+
+function renderKamalFuelRequestsPanel() {
+  if (!elements.kamalFuelRequestsSection) {
+    return;
+  }
+
+  const isKamal = state.activeUser?.email?.toLowerCase() === "kamal@modesigns.in";
+  elements.kamalFuelRequestsSection.classList.toggle("hidden", !isKamal);
+  if (!isKamal) {
+    return;
+  }
+
+  const dueRequests = getPendingFuelRequests();
+  elements.kamalFuelRequestsMeta.textContent = `${dueRequests.length} driver${dueRequests.length === 1 ? "" : "s"} due for fuel`;
+  elements.kamalFuelRequestsBoard.innerHTML = "";
+
+  if (!dueRequests.length) {
+    elements.kamalFuelRequestsBoard.append(createEmptyState("No drivers are due for a fuel refill right now."));
+    return;
+  }
+
+  dueRequests.forEach((request) => {
+    elements.kamalFuelRequestsBoard.append(createFuelRequestCard(request));
+  });
+}
+
+
+function createFuelRequestCard(request) {
+  const card = document.createElement("article");
+  card.className = "task-card task-card--alert";
+  card.innerHTML = `
+    <div class="task-card__top">
+      <div>
+        <strong>${escapeHtml(request.user.name)}</strong>
+      </div>
+      <span class="task-badge task-badge--alert">${escapeHtml(String(request.kmSinceLastFill))} km since last fill</span>
+    </div>
+    <div class="task-card__meta">
+      <span>${escapeHtml(request.vehicleType)} · Vehicle ${escapeHtml(request.vehicleNumber)} · Threshold ${escapeHtml(String(request.threshold))} km</span>
+      <span>Last filled ${escapeHtml(formatDateValue(toDateValue(request.lastFilledAt)))}</span>
+    </div>
   `;
   return card;
 }
@@ -260,9 +417,11 @@ function renderApprovalsPage() {
   if (!canView) {
     elements.approvalsPendingBoard.innerHTML = "";
     elements.approvalsCompletedBoard.innerHTML = "";
+    elements.approvalsNotCompletedBoard.innerHTML = "";
     elements.approvalsApprovedBoard.innerHTML = "";
     elements.approvalsPendingPagination.innerHTML = "";
     elements.approvalsCompletedPagination.innerHTML = "";
+    elements.approvalsNotCompletedPagination.innerHTML = "";
     elements.approvalsApprovedPagination.innerHTML = "";
     return;
   }
@@ -297,22 +456,36 @@ function renderApprovalsPage() {
     .map((task) => ({ task }))
     .sort((left, right) => (left.task.assigneeName || "").localeCompare(right.task.assigneeName || ""));
 
-  const visibleEntries = submittedEntries.filter((entry) => entry.completion.kamalApprovalStatus !== "pending");
-  const completed = visibleEntries.filter((entry) => entry.completion.approvalStatus !== "approved");
+  const visibleEntries = submittedEntries.filter(
+    (entry) =>
+      entry.completion.kamalApprovalStatus !== "pending" &&
+      entry.completion.hrApprovalStatus !== "pending" &&
+      entry.completion.cashierApprovalStatus !== "pending" &&
+      entry.completion.arunApprovalStatus !== "pending"
+  );
+  const completed = visibleEntries.filter(
+    (entry) => entry.completion.approvalStatus !== "approved" && entry.completion.status !== "not_completed"
+  );
+  const notCompleted = visibleEntries.filter(
+    (entry) => entry.completion.approvalStatus !== "approved" && entry.completion.status === "not_completed"
+  );
   const approved = visibleEntries.filter((entry) => entry.completion.approvalStatus === "approved");
 
   elements.approvalsPendingMeta.textContent = `${notSubmitted.length} task${notSubmitted.length === 1 ? "" : "s"} not yet submitted`;
   elements.approvalsCompletedMeta.textContent = `${completed.length} submission${completed.length === 1 ? "" : "s"} awaiting review`;
+  elements.approvalsNotCompletedMeta.textContent = `${notCompleted.length} "not completed" submission${notCompleted.length === 1 ? "" : "s"} awaiting review`;
   elements.approvalsApprovedMeta.textContent = `${approved.length} submission${approved.length === 1 ? "" : "s"} approved`;
   elements.approvalsPendingTabCount.textContent = String(notSubmitted.length);
   elements.approvalsCompletedTabCount.textContent = String(completed.length);
+  elements.approvalsNotCompletedTabCount.textContent = String(notCompleted.length);
   elements.approvalsApprovedTabCount.textContent = String(approved.length);
 
-  const activeTab = ["pending", "completed", "approved", "live"].includes(state.approvalsTab)
+  const activeTab = ["pending", "completed", "notcompleted", "approved", "live"].includes(state.approvalsTab)
     ? state.approvalsTab
     : "pending";
   elements.approvalsPendingSection.classList.toggle("hidden", activeTab !== "pending");
   elements.approvalsCompletedSection.classList.toggle("hidden", activeTab !== "completed");
+  elements.approvalsNotCompletedSection.classList.toggle("hidden", activeTab !== "notcompleted");
   elements.approvalsApprovedSection.classList.toggle("hidden", activeTab !== "approved");
   elements.approvalsLiveSection.classList.toggle("hidden", activeTab !== "live");
   elements.approvalsTabNav.querySelectorAll("[data-approvals-tab]").forEach((button) => {
@@ -337,6 +510,16 @@ function renderApprovalsPage() {
     headerRow: "<th>Task</th><th>Department</th><th>Task ID</th><th>Submitted</th><th>Details</th><th>Action</th>",
     createRow: (entry) => createApprovalRow(entry, true),
     countLabel: (count) => `submission${count === 1 ? "" : "s"} awaiting review`,
+  });
+
+  renderGroupedApprovalRows(notCompleted, {
+    board: elements.approvalsNotCompletedBoard,
+    emptyState: elements.approvalsNotCompletedEmpty,
+    pagination: elements.approvalsNotCompletedPagination,
+    pageKey: "approvalsNotCompletedPage",
+    headerRow: "<th>Task</th><th>Department</th><th>Task ID</th><th>Submitted</th><th>Reason</th><th>Action</th>",
+    createRow: (entry) => createApprovalRow(entry, true),
+    countLabel: (count) => `"not completed" submission${count === 1 ? "" : "s"} awaiting review`,
   });
 
   renderGroupedApprovalRows(approved, {
@@ -557,6 +740,10 @@ function createApprovalRow(entry, isAwaitingApproval) {
 
 
 function summarizeCompletion(task, completion) {
+  if (completion.status === "not_completed") {
+    return `Not completed — ${completion.remarks || "no remark given"}`;
+  }
+
   if (isSiteVisitTask(task) && completion.responses?.visits) {
     return `${SITE_VISIT_COUNT}/${SITE_VISIT_COUNT} site visits completed`;
   }
@@ -699,10 +886,8 @@ function createWalkinCustomerCard(group) {
       const completion = getCompletionRecord(task);
       const availability = getTaskAvailability(task);
       const actionMarkup = completion
-        ? `<span class="status-badge">Completed</span>`
-        : availability.enabled
-          ? `<button type="button" class="status-button" data-complete-task="true" data-task-key="${escapeHtml(getTaskOccurrenceIdentity(task))}">${escapeHtml(availability.label)}</button>`
-          : `<button type="button" class="status-button" disabled title="${escapeHtml(availability.reason)}">${escapeHtml(availability.label)}</button>`;
+        ? createCompletionStatusBadge(completion)
+        : createTaskStatusSelect(task, availability);
 
       return `
         <article class="admin-task-item">
@@ -771,7 +956,13 @@ function renderEmployeeTaskBoard() {
     .filter((task, index, allTasks) => {
       return index === allTasks.findIndex((item) => getTaskOccurrenceIdentity(item) === getTaskOccurrenceIdentity(task));
     })
-    .sort((left, right) => getTaskReferenceDate(left) - getTaskReferenceDate(right));
+    .sort((left, right) => {
+      const dateDiff = getTaskReferenceDate(left) - getTaskReferenceDate(right);
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+      return getTaskSequenceValue(left) - getTaskSequenceValue(right);
+    });
 
   // Walk-in tasks get their own per-customer board (renderWalkinCustomerBoard
   // above) — keep them out of this flat table so they aren't shown twice.
@@ -806,7 +997,7 @@ function renderEmployeeTaskBoard() {
 
   if (!displayOccurrences.length) {
     const emptyRow = document.createElement("tr");
-    emptyRow.innerHTML = `<td colspan="7">No assigned tasks are visible for the selected filters.</td>`;
+    emptyRow.innerHTML = `<td colspan="9">No assigned tasks are visible for the selected filters.</td>`;
     elements.employeeTaskTableBody.append(emptyRow);
     return;
   }
@@ -876,6 +1067,54 @@ function renderStats() {
   elements.salesUsers.textContent = String(countByRole("salesman"));
   elements.installerUsers.textContent = String(countByRole("installer"));
   elements.activeUserName.textContent = state.activeUser?.name ?? "Guest";
+}
+
+
+function renderPasswordResetRequestsPanel() {
+  if (!elements.passwordResetRequestsPanel) {
+    return;
+  }
+
+  const isAdminUser = isAdmin(state.activeUser);
+  const pendingRequests = (state.passwordResetRequests || [])
+    .filter((request) => !request.resolvedAt)
+    .sort((left, right) => new Date(right.requestedAt) - new Date(left.requestedAt));
+
+  elements.passwordResetRequestsPanel.classList.toggle("hidden", !isAdminUser || !pendingRequests.length);
+  if (!isAdminUser) {
+    return;
+  }
+
+  elements.passwordResetRequestsMeta.textContent = `${pendingRequests.length} request${pendingRequests.length === 1 ? "" : "s"} pending`;
+  elements.passwordResetRequestsBoard.innerHTML = "";
+  pendingRequests.forEach((request, index) => {
+    elements.passwordResetRequestsBoard.append(createPasswordResetRequestCard(request, index));
+  });
+}
+
+
+function createPasswordResetRequestCard(request, index) {
+  const inputId = `passwordResetInput-${index}`;
+  const card = document.createElement("article");
+  card.className = "task-card task-card--alert";
+  card.innerHTML = `
+    <div class="task-card__top">
+      <div>
+        <strong>${escapeHtml(request.name || request.email)}</strong>
+      </div>
+      <span class="task-badge task-badge--alert">Password reset requested</span>
+    </div>
+    <div class="task-card__meta">
+      <span>${escapeHtml(request.email)}</span>
+      <span>Requested ${escapeHtml(formatDateValue(toDateValue(request.requestedAt)))}</span>
+    </div>
+    <div class="password-field password-field--inline">
+      <input type="password" id="${inputId}" placeholder="Set a new password" minlength="6" />
+      <button type="button" class="password-toggle" data-password-toggle="${inputId}" aria-label="Show password">👁</button>
+    </div>
+    <button type="button" class="button button--primary" data-resolve-reset-request="${escapeHtml(request.email)}" data-reset-input="${inputId}">Set password</button>
+  `;
+  return card;
 }
 
 
@@ -983,6 +1222,168 @@ function renderBuddyPage() {
 }
 
 
+const CONTACTS_PAGE_SIZE = 10;
+
+// Serial numbers reflect each contact's fixed position in the source
+// directory, not the filtered result order, so a search doesn't renumber them.
+function getFilteredContacts() {
+  const query = state.contactsQuery.trim().toLowerCase();
+  const withNumbers = CONTACT_DIRECTORY.map((contact, index) => ({ contact, serialNumber: index + 1 }));
+  if (!query) {
+    return withNumbers;
+  }
+  return withNumbers.filter(({ contact }) => {
+    const searchable = `${contact.name} ${contact.department} ${contact.location} ${contact.phone} ${contact.remark}`.toLowerCase();
+    return searchable.includes(query);
+  });
+}
+
+function renderContactDirectory() {
+  if (!elements.contactsPage) {
+    return;
+  }
+
+  elements.contactsCount.textContent = String(CONTACT_DIRECTORY.length);
+
+  const filteredContacts = getFilteredContacts();
+  elements.contactsTableBody.innerHTML = "";
+  elements.contactsMobileCards.innerHTML = "";
+  elements.contactsPagination.innerHTML = "";
+  elements.contactsEmptyState.classList.toggle("hidden", filteredContacts.length > 0);
+
+  if (!filteredContacts.length) {
+    return;
+  }
+
+  const pageSize = CONTACTS_PAGE_SIZE;
+  const totalPages = Math.max(1, Math.ceil(filteredContacts.length / pageSize));
+  if (state.contactsPage > totalPages) {
+    state.contactsPage = totalPages;
+  }
+  if (state.contactsPage < 1) {
+    state.contactsPage = 1;
+  }
+
+  const startIndex = (state.contactsPage - 1) * pageSize;
+  const pageContacts = filteredContacts.slice(startIndex, startIndex + pageSize);
+
+  pageContacts.forEach(({ contact, serialNumber }) => {
+    elements.contactsTableBody.append(createContactRow(contact, serialNumber));
+    elements.contactsMobileCards.append(createContactMobileCard(contact, serialNumber));
+  });
+
+  renderPaginationControls(elements.contactsPagination, state.contactsPage, totalPages, (page) => {
+    state.contactsPage = page;
+    renderContactDirectory();
+  });
+}
+
+
+function createContactRow(contact, serialNumber) {
+  const row = document.createElement("tr");
+  row.innerHTML = `
+    <td>${escapeHtml(String(serialNumber))}</td>
+    <td class="name-cell"><strong>${escapeHtml(contact.name)}</strong></td>
+    <td>${escapeHtml(normalizeValue(contact.department))}</td>
+    <td>${escapeHtml(normalizeValue(contact.location))}</td>
+    <td>${escapeHtml(contact.phone)}</td>
+    <td>${escapeHtml(contact.remark)}</td>
+  `;
+  return row;
+}
+
+
+function createContactMobileCard(contact, serialNumber) {
+  const card = document.createElement("article");
+  card.className = "mobile-card";
+  card.innerHTML = `
+    <strong>${escapeHtml(String(serialNumber))}. ${escapeHtml(contact.name)}</strong>
+    <div class="mobile-card__meta">Department: ${escapeHtml(normalizeValue(contact.department))}</div>
+    <div class="mobile-card__meta">Location: ${escapeHtml(normalizeValue(contact.location))}</div>
+    <div class="mobile-card__meta">Phone: ${escapeHtml(contact.phone)}</div>
+    <div class="mobile-card__meta">Remark: ${escapeHtml(contact.remark)}</div>
+  `;
+  return card;
+}
+
+
+function renderCompliancePage() {
+  if (!elements.compliancePage) {
+    return;
+  }
+
+  // Default range only fills in once (both fields start empty) — later
+  // renders (periodic refresh, etc.) respect whatever the admin has set.
+  if (!elements.complianceStartDate.value) {
+    elements.complianceStartDate.value = "2026-07-22";
+  }
+  if (!elements.complianceEndDate.value) {
+    elements.complianceEndDate.value = todayValue();
+  }
+
+  const days = getComplianceReportForDateRange(elements.complianceStartDate.value, elements.complianceEndDate.value);
+  const daysWithActivity = days.filter((day) => day.entries.length);
+
+  const totalExpected = daysWithActivity.reduce((sum, day) => sum + day.entries.length, 0);
+  const totalMissed = daysWithActivity.reduce((sum, day) => sum + day.missedCount, 0);
+  elements.complianceMeta.textContent = totalExpected
+    ? `${totalExpected} checklist${totalExpected === 1 ? "" : "s"} expected across ${daysWithActivity.length} day${daysWithActivity.length === 1 ? "" : "s"} · ${totalMissed} missed`
+    : "";
+
+  elements.complianceBoard.innerHTML = "";
+  elements.complianceEmptyState.classList.toggle("hidden", daysWithActivity.length > 0);
+
+  daysWithActivity
+    .slice()
+    .reverse()
+    .forEach((day) => {
+      elements.complianceBoard.append(createComplianceDayCard(day));
+    });
+}
+
+
+function createComplianceDayCard(day) {
+  const card = document.createElement("details");
+  card.className = `task-card task-card--group${day.missedCount ? " task-card--alert" : ""}`;
+
+  const rowsMarkup = day.entries
+    .map(
+      (entry) => `
+        <tr>
+          <td>${escapeHtml(entry.task.assigneeName || "-")}</td>
+          <td>${escapeHtml(getTaskDisplayTitle(entry.task))}</td>
+          <td>${
+            entry.completion
+              ? '<span class="status-badge">Completed</span>'
+              : '<span class="status-badge status-badge--alert">Not submitted</span>'
+          }</td>
+        </tr>
+      `
+    )
+    .join("");
+
+  card.innerHTML = `
+    <summary class="admin-task-summary">
+      <div class="task-card__top">
+        <div>
+          <strong>${escapeHtml(formatDateValue(day.date))}</strong>
+        </div>
+        <span class="task-badge${day.missedCount ? " task-badge--alert" : ""}">
+          ${escapeHtml(String(day.completedCount))} completed · ${escapeHtml(String(day.missedCount))} missed
+        </span>
+      </div>
+    </summary>
+    <div class="table-shell">
+      <table class="user-table">
+        <thead><tr><th>Employee</th><th>Task</th><th>Status</th></tr></thead>
+        <tbody>${rowsMarkup}</tbody>
+      </table>
+    </div>
+  `;
+  return card;
+}
+
+
 function renderSidebarVisibility() {
   const usersLink = document.querySelector('.sidebar-link[data-view="users"]');
   if (usersLink) {
@@ -992,6 +1393,11 @@ function renderSidebarVisibility() {
   const approvalsLink = document.querySelector('.sidebar-link[data-view="approvals"]');
   if (approvalsLink) {
     approvalsLink.classList.toggle("hidden", !canAssignTasks(state.activeUser));
+  }
+
+  const complianceLink = document.querySelector('.sidebar-link[data-view="compliance"]');
+  if (complianceLink) {
+    complianceLink.classList.toggle("hidden", !canAssignTasks(state.activeUser));
   }
 }
 
@@ -1312,6 +1718,62 @@ function readFileAsBase64(file) {
   });
 }
 
+// Native file inputs only show a filename, with no way to drop one file out
+// of a multi-file selection — this renders that selection as a removable
+// list, rebuilding field.files via DataTransfer since FileList itself is
+// read-only.
+function attachRemovableFileList(field, wrapper) {
+  const list = document.createElement("ul");
+  list.className = "checklist-file-list";
+  wrapper.append(list);
+
+  const renderList = () => {
+    list.innerHTML = "";
+    Array.from(field.files || []).forEach((file, index) => {
+      const item = document.createElement("li");
+      item.className = "checklist-file-list__item";
+
+      const name = document.createElement("span");
+      name.textContent = file.name;
+      item.append(name);
+
+      const removeButton = document.createElement("button");
+      removeButton.type = "button";
+      removeButton.className = "checklist-file-list__remove";
+      removeButton.textContent = "Remove";
+      removeButton.addEventListener("click", () => {
+        const remaining = Array.from(field.files).filter((_, fileIndex) => fileIndex !== index);
+        const dataTransfer = new DataTransfer();
+        remaining.forEach((remainingFile) => dataTransfer.items.add(remainingFile));
+        field.files = dataTransfer.files;
+        renderList();
+      });
+      item.append(removeButton);
+
+      list.append(item);
+    });
+  };
+
+  field.addEventListener("change", renderList);
+}
+
+// Uploading a file already answers "yes, done" for the paired checkbox
+// question — this ticks Yes (and clears No) so the employee doesn't have to
+// click both. Manual unchecking afterwards is still respected; this only
+// fires on the upload itself.
+function attachAutoConfirmOnUpload(fileInput, confirmQuestionId) {
+  fileInput.addEventListener("change", () => {
+    if (!fileInput.files || !fileInput.files.length) {
+      return;
+    }
+    const yesInput = document.getElementById(`question-${confirmQuestionId}-yes`);
+    if (yesInput && !yesInput.checked) {
+      yesInput.checked = true;
+      yesInput.dispatchEvent(new Event("change"));
+    }
+  });
+}
+
 function attachOcrAutofill(fileInput, numberField, wrapper, unitHint) {
   const status = document.createElement("p");
   status.className = "checklist-hint checklist-ocr-status hidden";
@@ -1421,6 +1883,12 @@ function renderChecklistFields(template) {
 
     if ((question.type === "file" || question.type === "photo") && previousNumberQuestion) {
       attachOcrAutofill(field, previousNumberQuestion.field, wrapper, previousNumberQuestion.question.ocrUnitHint);
+    }
+    if ((question.type === "file" || question.type === "photo") && question.autoConfirmQuestionId) {
+      attachAutoConfirmOnUpload(field, question.autoConfirmQuestionId);
+    }
+    if (question.type === "file" || question.type === "photo") {
+      attachRemovableFileList(field, wrapper);
     }
     previousNumberQuestion = question.type === "number" ? { field, question } : null;
 
@@ -1965,12 +2433,16 @@ function renderCurrentView() {
   const isHomeView = state.currentView === "home";
   const isUsersView = state.currentView === "users";
   const isApprovalsView = state.currentView === "approvals";
+  const isComplianceView = state.currentView === "compliance";
   const isBuddyView = state.currentView === "buddy";
+  const isContactsView = state.currentView === "contacts";
 
   elements.homePage.classList.toggle("hidden", !isHomeView);
   elements.usersPage.classList.toggle("hidden", !isUsersView);
   elements.approvalsPage.classList.toggle("hidden", !isApprovalsView);
+  elements.compliancePage.classList.toggle("hidden", !isComplianceView);
   elements.buddyPage.classList.toggle("hidden", !isBuddyView);
+  elements.contactsPage.classList.toggle("hidden", !isContactsView);
 
   elements.navLinks.forEach((link) => {
     link.classList.toggle("is-active", link.dataset.view === state.currentView);
@@ -2085,9 +2557,30 @@ function createAdminTaskCard(group) {
 }
 
 
-function getEmployeeTaskDisplayTitle(task) {
-  const title = getTaskDisplayTitle(task);
-  return task.customerAttributionName ? `${title} for ${task.customerAttributionName}` : title;
+function createCompletionStatusBadge(completion) {
+  if (completion.status === "not_completed") {
+    return `<span class="status-badge status-badge--alert" title="${escapeHtml(completion.remarks || "")}">Not completed</span>`;
+  }
+  return `<span class="status-badge">Completed</span>`;
+}
+
+
+// Only for single-shot tasks — the multi-entry types (site visits, generator
+// units, cash-handling shifts, etc.) keep their own progress button below
+// since "completed/not completed" doesn't fit a checklist with several
+// independently-completable rows inside it.
+function createTaskStatusSelect(task, availability) {
+  if (!availability.enabled) {
+    return `<button type="button" class="status-button" disabled title="${escapeHtml(availability.reason)}">${escapeHtml(availability.label)}</button>`;
+  }
+  const taskKey = escapeHtml(getTaskOccurrenceIdentity(task));
+  return `
+    <select class="status-select" data-status-select="true" data-task-key="${taskKey}">
+      <option value="" selected disabled hidden>Update status</option>
+      <option value="completed">Task completed</option>
+      <option value="not_completed">Not completed</option>
+    </select>
+  `;
 }
 
 
@@ -2095,6 +2588,13 @@ function createEmployeeTaskRow(task) {
   const completion = getCompletionRecord(task);
   const availability = getTaskAvailability(task);
   const row = document.createElement("tr");
+
+  const isMultiStepTask =
+    isSiteVisitTask(task) ||
+    isGeneratorChecklistTask(task) ||
+    isCashHandlingChecklistTask(task) ||
+    isMeterReadingChecklistTask(task) ||
+    isEarthingCleaningTask(task);
 
   let buttonLabel = availability.label;
   if (!completion && isSiteVisitTask(task)) {
@@ -2126,7 +2626,9 @@ function createEmployeeTaskRow(task) {
 
   row.innerHTML = `
     <td>${escapeHtml(task.coverageSourceName || task.assigneeName || state.activeUser?.name || "-")}</td>
-    <td>${escapeHtml(getEmployeeTaskDisplayTitle(task))}</td>
+    <td>${escapeHtml(getTaskDisplayTitle(task))}</td>
+    <td>${escapeHtml(task.customerAttributionName || task.customerName || "-")}</td>
+    <td>${escapeHtml(task.customerAttributionKey || task.walkinId || "-")}</td>
     <td><span class="freq-pill">${escapeHtml(getFrequencyShortLabel(getTaskDisplayFrequency(task)))}</span></td>
     <td>${escapeHtml(normalizeValue(task.department))}</td>
     <td>${escapeHtml(formatTaskDate(task))}</td>
@@ -2134,10 +2636,12 @@ function createEmployeeTaskRow(task) {
     <td>
       ${
         completion
-          ? `<span class="status-badge">Completed</span>`
-          : availability.enabled
-            ? `<button type="button" class="status-button" data-complete-task="true" data-task-key="${escapeHtml(getTaskOccurrenceIdentity(task))}">${escapeHtml(buttonLabel)}</button>`
-            : `<button type="button" class="status-button" disabled title="${escapeHtml(availability.reason)}">${escapeHtml(buttonLabel)}</button>`
+          ? createCompletionStatusBadge(completion)
+          : isMultiStepTask
+            ? availability.enabled
+              ? `<button type="button" class="status-button" data-complete-task="true" data-task-key="${escapeHtml(getTaskOccurrenceIdentity(task))}">${escapeHtml(buttonLabel)}</button>`
+              : `<button type="button" class="status-button" disabled title="${escapeHtml(availability.reason)}">${escapeHtml(buttonLabel)}</button>`
+            : createTaskStatusSelect(task, availability)
       }
     </td>
   `;

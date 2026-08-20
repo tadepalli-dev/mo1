@@ -172,21 +172,262 @@ function buildEarthingCleaningChecklistTemplate(location) {
 
 
 function requiresKamalPreApproval(task) {
-  return (
-    normalizeTaskTitle(task?.title).includes("ac filter cleaning") &&
-    task?.assigneeEmail?.toLowerCase() === "arunmishra@modesigns.in"
-  );
+  const title = normalizeTaskTitle(task?.title);
+  if (title.includes("ac filter cleaning") && task?.assigneeEmail?.toLowerCase() === "arunmishra@modesigns.in") {
+    return true;
+  }
+  return title.includes("vehicle service");
 }
 
 function getPendingKamalApprovalEntries() {
   return Object.entries(state.completions)
-    .filter(([, completion]) => completion.kamalApprovalStatus === "pending")
+    .filter(([, completion]) => completion.kamalApprovalStatus === "pending" || completion.hrApprovalStatus === "pending")
     .map(([key, completion]) => {
       const task = state.tasks.find((item) => String(item.taskId || item.id) === String(completion.taskId));
       return task ? { key, completion, task } : null;
     })
     .filter(Boolean)
     .sort((left, right) => new Date(right.completion.submittedAt) - new Date(left.completion.submittedAt));
+}
+
+
+// The camera checklist got reassigned from Arun Mishra to Kamal (he's the
+// one actually meant to check it), but Arun still needs to see and sign off
+// on what Kamal finds — same cross-check shape as requiresKamalPreApproval
+// above, just the other direction.
+function requiresArunPreApproval(task) {
+  const title = normalizeTaskTitle(task?.title);
+  return title.includes("camera functioning") && task?.assigneeEmail?.toLowerCase() === "kamal@modesigns.in";
+}
+
+function getPendingArunApprovalEntries() {
+  return Object.entries(state.completions)
+    .filter(([, completion]) => completion.arunApprovalStatus === "pending")
+    .map(([key, completion]) => {
+      const task = state.tasks.find((item) => String(item.taskId || item.id) === String(completion.taskId));
+      return task ? { key, completion, task } : null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => new Date(right.completion.submittedAt) - new Date(left.completion.submittedAt));
+}
+
+
+// "Average 40/50 kms" for two-wheelers taken as the midpoint; the car number
+// is a Gurugram-local-route estimate — both were given directly by ops, not
+// derived from anything in the data.
+const FUEL_REQUEST_THRESHOLD_KM = {
+  "Two Wheeler": 45,
+  "Four Wheeler": 150,
+};
+
+function getFuelChecklistTaskId(user) {
+  const template = SHARED_INSTALLER_TASK_TEMPLATES.find((item) => item.key === "fuel-checklist");
+  return template ? buildInstallerTaskId(user, template) : null;
+}
+
+// Sorted most-recent-first so callers can read [latest, previous] directly.
+function getFuelChecklistHistoryForUser(user) {
+  const taskId = getFuelChecklistTaskId(user);
+  if (!taskId) {
+    return [];
+  }
+  return Object.values(state.completions)
+    .filter(
+      (completion) =>
+        String(completion.taskId) === taskId && Number.isFinite(Number(completion.responses?.odometer_reading))
+    )
+    .sort((left, right) => new Date(right.submittedAt) - new Date(left.submittedAt));
+}
+
+// Distance driven is only knowable once two odometer readings exist — a
+// single fill-up has nothing to measure against, so it's not flaggable yet.
+function getFuelRequestStatusForUser(user) {
+  const [latest, previous] = getFuelChecklistHistoryForUser(user);
+  if (!latest || !previous) {
+    return null;
+  }
+
+  const latestKm = Number(latest.responses.odometer_reading);
+  const previousKm = Number(previous.responses.odometer_reading);
+  if (latestKm < previousKm) {
+    return null;
+  }
+
+  const vehicleType = latest.responses.vehicle_type || getKnownVehicleTypeForUser(user) || "Two Wheeler";
+  const threshold = FUEL_REQUEST_THRESHOLD_KM[vehicleType] || FUEL_REQUEST_THRESHOLD_KM["Two Wheeler"];
+  const kmSinceLastFill = latestKm - previousKm;
+
+  return {
+    user,
+    vehicleType,
+    vehicleNumber: latest.responses.vehicle_number || "-",
+    kmSinceLastFill,
+    threshold,
+    due: kmSinceLastFill >= threshold,
+    lastFilledAt: latest.submittedAt,
+  };
+}
+
+function getPendingFuelRequests() {
+  return state.users
+    .filter(isInstallerUser)
+    .map(getFuelRequestStatusForUser)
+    .filter((status) => status?.due)
+    .sort((left, right) => right.kmSinceLastFill - left.kmSinceLastFill);
+}
+
+
+function isFuelChecklistTask(task) {
+  return normalizeTaskTitle(task?.title).includes("fuel checklist");
+}
+
+// Needs a prior fill to diff against; a driver's very first-ever submission
+// has no mileage to compute yet, so it's routed nowhere special.
+function getFuelApprovalRoute(task, responses) {
+  if (!isFuelChecklistTask(task)) {
+    return null;
+  }
+
+  const user = { email: task?.assigneeEmail, name: task?.assigneeName };
+  const [previous] = getFuelChecklistHistoryForUser(user);
+  if (!previous) {
+    return null;
+  }
+
+  const currentKm = Number(responses?.odometer_reading);
+  const previousKm = Number(previous.responses?.odometer_reading);
+  const liters = Number(responses?.fuel_amount);
+  if (
+    !Number.isFinite(currentKm) ||
+    !Number.isFinite(previousKm) ||
+    !Number.isFinite(liters) ||
+    liters <= 0 ||
+    currentKm < previousKm
+  ) {
+    return null;
+  }
+
+  const mileage = (currentKm - previousKm) / liters;
+  const vehicleType = responses?.vehicle_type || getKnownVehicleTypeForUser(user) || "Two Wheeler";
+  // Per-model reference mileage (same values as the fuel-gate profiles:
+  // bike 50, Wagon R 16, Dzire/Suzuki 15, Eco 12, other cars default 12).
+  // Strictly above goes to the cashier for routine processing; at or below
+  // is unusual enough to flag for HR.
+  const threshold = getFuelGateProfileForUser(user, vehicleType).mileageKmPerLiter;
+  return { mileage, threshold, route: mileage > threshold ? "cashier" : "hr" };
+}
+
+function getPendingCashierApprovalEntries() {
+  return Object.entries(state.completions)
+    .filter(([, completion]) => completion.cashierApprovalStatus === "pending")
+    .map(([key, completion]) => {
+      const task = state.tasks.find((item) => String(item.taskId || item.id) === String(completion.taskId));
+      return task ? { key, completion, task } : null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => new Date(right.completion.submittedAt) - new Date(left.completion.submittedAt));
+}
+
+
+// Fixed reference litres/mileage per vehicle model, used only to compute a
+// realistic minimum km-per-fill gate — NOT the actual liters/mileage a
+// driver reports on a given submission. Values given directly by ops.
+const FUEL_GATE_PROFILES = {
+  "two wheeler": { litres: 6, mileageKmPerLiter: 50 },
+  "wagon r": { litres: 40, mileageKmPerLiter: 16 },
+  desire: { litres: 40, mileageKmPerLiter: 15 },
+  eco: { litres: 40, mileageKmPerLiter: 12 },
+  "default four wheeler": { litres: 28, mileageKmPerLiter: 12 },
+};
+
+// The vehicle model isn't collected on the checklist itself — it's derived
+// from the model name embedded in the VEHICLE_ASSIGNMENTS directory's
+// vehicleNumber (e.g. "Wagon r- HR 98 J 2273"), the same directory
+// getKnownVehicleTypeForUser reads.
+function getVehicleModelKeyForUser(user) {
+  const email = String(user?.email || "").trim().toLowerCase();
+  const match = VEHICLE_ASSIGNMENTS.find((entry) => {
+    const entryEmail = String(entry.email || "").trim().toLowerCase();
+    if (entryEmail && entryEmail === email) {
+      return true;
+    }
+    const names = Array.isArray(entry.names) ? entry.names : [];
+    return names.some((name) => normalizePersonName(name) === normalizePersonName(user?.name));
+  });
+  if (!match) {
+    return null;
+  }
+  if (match.vehicleType === "Two Wheeler") {
+    return "two wheeler";
+  }
+  const modelPrefix = String(match.vehicleNumber || "").split("-")[0].trim().toLowerCase();
+  if (modelPrefix.includes("wagon")) {
+    return "wagon r";
+  }
+  if (modelPrefix.includes("desire") || modelPrefix.includes("dzire")) {
+    return "desire";
+  }
+  if (modelPrefix.includes("eco")) {
+    return "eco";
+  }
+  return "default four wheeler";
+}
+
+function getFuelGateProfileForUser(user, vehicleType) {
+  const modelKey = getVehicleModelKeyForUser(user);
+  if (modelKey && FUEL_GATE_PROFILES[modelKey]) {
+    return FUEL_GATE_PROFILES[modelKey];
+  }
+  // No known vehicle assignment on file — fall back by the reported vehicle
+  // type instead of leaving the gate uncomputable.
+  return vehicleType === "Two Wheeler"
+    ? FUEL_GATE_PROFILES["two wheeler"]
+    : FUEL_GATE_PROFILES["default four wheeler"];
+}
+
+function getFuelGateThresholdKm(user, vehicleType) {
+  const profile = getFuelGateProfileForUser(user, vehicleType);
+  return profile.litres * profile.mileageKmPerLiter - 25;
+}
+
+// A driver's first 3 fuel checklist submissions ever are unrestricted; from
+// the 4th on, each new submission must show at least the gate's threshold
+// km driven since the previous one, or it's rejected outright — this is what
+// actually stops the "submit a slip every couple of days" pattern, since the
+// button itself can't be pre-disabled without already knowing today's
+// odometer reading.
+const FUEL_CHECKLIST_GRACE_SUBMISSIONS = 3;
+
+function validateFuelChecklistSubmission(task, responses) {
+  if (!isFuelChecklistTask(task)) {
+    return { ok: true };
+  }
+
+  const user = { email: task?.assigneeEmail, name: task?.assigneeName };
+  const history = getFuelChecklistHistoryForUser(user);
+  if (history.length < FUEL_CHECKLIST_GRACE_SUBMISSIONS) {
+    return { ok: true };
+  }
+
+  const [previous] = history;
+  const previousKm = Number(previous.responses?.odometer_reading);
+  const currentKm = Number(responses?.odometer_reading);
+  if (!Number.isFinite(previousKm) || !Number.isFinite(currentKm)) {
+    return { ok: true };
+  }
+
+  const vehicleType = responses?.vehicle_type || getKnownVehicleTypeForUser(user) || "Two Wheeler";
+  const thresholdKm = getFuelGateThresholdKm(user, vehicleType);
+  const kmSinceLastFill = currentKm - previousKm;
+
+  if (kmSinceLastFill < thresholdKm) {
+    return {
+      ok: false,
+      message: `Only ${Math.max(kmSinceLastFill, 0)} km driven since the last fill-up — at least ${thresholdKm} km is expected before refueling again.`,
+    };
+  }
+
+  return { ok: true };
 }
 
 
@@ -606,69 +847,45 @@ function getDateRangeBounds(range) {
 }
 
 
-// Every occurrence of every active task, from when each task started
-// through today, matched against state.completions to show who's actually
-// submitted vs still pending — the full audit for the Submissions Report
-// sheet (not just an event log of what's been submitted so far).
-function buildSubmissionAuditRows() {
-  const rows = [];
-  const seenKeys = new Set();
-
-  state.tasks
-    .filter((task) => task.active !== false)
-    .forEach((task) => {
-      expandTaskForDateRange(task, "allTime").forEach((occurrence) => {
-        const key = getCompletionKey(occurrence);
-        if (seenKeys.has(key)) {
-          return;
-        }
-        seenKeys.add(key);
-        const completion = state.completions[key];
-        rows.push({
-          assigneeName: occurrence.assigneeName,
-          assigneeEmail: occurrence.assigneeEmail,
-          taskTitle: getTaskDisplayTitle(occurrence),
-          plannedDate: occurrence.occurrenceDate,
-          submittedAt: completion ? completion.submittedAt : null,
-        });
-      });
-    });
-
-  // A task's plannedDate can get bumped forward when it's re-assigned/edited
-  // (DEFAULT_TASK_START_DATE tracks "today"), which can leave older
-  // completions outside the [plannedDate, today] window computed above.
-  // Union those back in so a real historical submission never disappears
-  // from the report just because the task moved on since then.
-  Object.entries(state.completions).forEach(([key, completion]) => {
-    if (seenKeys.has(key)) {
-      return;
-    }
-    const task = state.tasks.find((item) => String(item.taskId || item.id) === String(completion.taskId));
-    if (!task) {
-      return;
-    }
-    seenKeys.add(key);
-    const slotLabel = completion.occurrenceSlotLabel || (completion.visitNumber ? `Visit ${completion.visitNumber}` : "");
-    rows.push({
-      assigneeName: task.assigneeName,
-      assigneeEmail: task.assigneeEmail,
-      taskTitle: slotLabel ? `${task.title} (${slotLabel})` : task.title,
-      plannedDate: completion.occurrenceDate,
-      submittedAt: completion.submittedAt,
-    });
-  });
-
-  return rows.sort((left, right) => {
-    if (left.plannedDate !== right.plannedDate) {
-      return left.plannedDate < right.plannedDate ? -1 : 1;
-    }
-    return (left.assigneeName || "").localeCompare(right.assigneeName || "");
-  });
-}
-
 
 function getCompletionRecord(task) {
   return state.completions[getCompletionKey(task)] || null;
+}
+
+
+// Same per-day "expected vs completed" computation the Approvals page uses
+// for a single date (state.tasks -> taskOccursOnDate -> createTaskOccurrencesForDate),
+// just looped across a date range so gaps across many days show up at once.
+function getComplianceReportForDateRange(startDateValue, endDateValue) {
+  const days = [];
+  const cursor = new Date(`${startDateValue}T00:00:00`);
+  const end = new Date(`${endDateValue}T00:00:00`);
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime()) || cursor > end) {
+    return days;
+  }
+
+  while (cursor <= end) {
+    const dateValue = dateToLocalValue(cursor);
+    const occurrences = state.tasks
+      .filter((task) => task.active !== false && taskOccursOnDate(task, dateValue))
+      .flatMap((task) => createTaskOccurrencesForDate(task, new Date(cursor)))
+      .filter((task) => isTaskCompletionEnabled(task) || getCompletionRecord(task));
+
+    const entries = occurrences
+      .map((task) => ({ task, completion: getCompletionRecord(task) }))
+      .sort((left, right) => (left.task.assigneeName || "").localeCompare(right.task.assigneeName || ""));
+
+    const missedCount = entries.filter((entry) => !entry.completion).length;
+    days.push({
+      date: dateValue,
+      entries,
+      completedCount: entries.length - missedCount,
+      missedCount,
+    });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return days;
 }
 
 
@@ -766,7 +983,7 @@ function buildDefaultChecklistTemplate(task) {
         id: "completion_notes",
         label: question.label,
         labelHindi: question.labelHindi,
-        type: "textarea",
+        type: "checkbox",
       },
       {
         id: "supporting_files",
@@ -774,6 +991,9 @@ function buildDefaultChecklistTemplate(task) {
         labelHindi: "यदि आवश्यक हो तो सहायक फ़ाइलें अपलोड करें।",
         type: "file",
         hint: "Upload up to 10 supported files. Max 100 MB per file.",
+        // Uploading proof already implies "yes, done" — ticking Yes by hand
+        // too would be a redundant extra step for the same signal.
+        autoConfirmQuestionId: "completion_notes",
       },
     ],
   };

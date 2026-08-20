@@ -9,6 +9,7 @@
           "data/**",
           "service-account-key.json",
           "checklist-sheet-config.json",
+          "submission-report-source.json",
           "lib/**"
         ]
       }

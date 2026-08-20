@@ -5,6 +5,8 @@ const { DatabaseSync } = require("node:sqlite");
 const admin = require("firebase-admin");
 const { getFirestore } = require("firebase-admin/firestore");
 const { appendChecklistSubmission, syncUsersSheet } = require("../lib/checklist-sheet-export");
+const { rewriteSubmissionReport } = require("../lib/submission-report-export");
+const { buildSubmissionAuditRows } = require("../lib/submission-audit");
 const { getServiceAccountEmail, lookupVehicleAssignment } = require("../lib/vehicle-sheet-directory");
 
 const ROOT = process.cwd();
@@ -17,7 +19,7 @@ const TMP_SHEETS_SECRET_PATH = path.join(TMP_DATA_DIR, "sheets-feed-secret.txt")
 const SERVICE_ACCOUNT_PATH = path.join(ROOT, "service-account-key.json");
 const FIRESTORE_STORE_COLLECTION = "motrack_store";
 
-const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations"];
+const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests"];
 const STORE_DEFAULTS = {
   users: [],
   tasks: [],
@@ -26,6 +28,7 @@ const STORE_DEFAULTS = {
   absences: {},
   pantryAlerts: [],
   liveLocations: {},
+  passwordResetRequests: [],
 };
 
 const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
@@ -626,6 +629,44 @@ async function handleLogin(request, response) {
   });
 }
 
+// Public (no session token) since the person submitting this hasn't logged
+// in yet — admin-mediated reset: this just queues a request for Asha to see
+// and action, there's no email service to send a reset link.
+async function handleForgotPassword(request, response) {
+  let payload;
+  try {
+    payload = await parseJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { ok: false, reason: "invalid_request" });
+    return;
+  }
+
+  const email = String(payload.email || "").trim().toLowerCase();
+  const users = await readUsersWithPasswordsAsync();
+  const matchedUser = users.find((user) => String(user.email || "").toLowerCase() === email);
+
+  if (!matchedUser) {
+    sendJson(response, 200, { ok: false, reason: "not_found" });
+    return;
+  }
+
+  const requests = await readStoreValueAsync("passwordResetRequests");
+  const alreadyPending = requests.some(
+    (item) => String(item.email || "").toLowerCase() === email && !item.resolvedAt
+  );
+  if (!alreadyPending) {
+    requests.push({
+      email: matchedUser.email,
+      name: matchedUser.name,
+      requestedAt: new Date().toISOString(),
+      resolvedAt: null,
+    });
+    await writeStoreValueAsync("passwordResetRequests", requests);
+  }
+
+  sendJson(response, 200, { ok: true });
+}
+
 function isAuthorized(request) {
   return Boolean(getSessionEmailFromToken(getBearerToken(request)));
 }
@@ -703,6 +744,11 @@ async function handler(request, response) {
       return;
     }
 
+    if (pathname === "/api/forgot-password" && request.method === "POST") {
+      await handleForgotPassword(request, response);
+      return;
+    }
+
   if (pathname === "/api/logout" && request.method === "POST") {
     sendJson(response, 200, { ok: true });
     return;
@@ -729,6 +775,29 @@ async function handler(request, response) {
       const payload = await parseJsonBody(request);
       const result = await syncUsersSheet(ROOT, payload.users);
       sendJson(response, 200, { ok: true, ...result });
+      return;
+    }
+
+    if (pathname === "/api/submission-report-sync" && request.method === "POST") {
+      if (!isAuthorized(request)) {
+        sendJson(response, 401, { ok: false, error: "Unauthorized. Please sign in again." });
+        return;
+      }
+
+      try {
+        // Rows are computed here from the store's own data, not trusted from
+        // the client — any browser (old build or new) can trigger a sync,
+        // but the sheet always reflects whatever logic is actually deployed.
+        const [tasks, completions] = await Promise.all([
+          readStoreValueAsync("tasks"),
+          readStoreValueAsync("completions"),
+        ]);
+        const rows = buildSubmissionAuditRows(tasks, completions);
+        const result = await rewriteSubmissionReport(ROOT, rows);
+        sendJson(response, 200, result);
+      } catch (error) {
+        sendJson(response, 500, { ok: false, error: error.message || "Could not sync the submission report." });
+      }
       return;
     }
 

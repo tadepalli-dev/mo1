@@ -38,14 +38,17 @@
 
             <label>
               Password
-              <input
-                type="password"
-                id="passwordInput"
-                name="password"
-                placeholder="Enter your password"
-                autocomplete="current-password"
-                required
-              />
+              <div class="password-field">
+                <input
+                  type="password"
+                  id="passwordInput"
+                  name="password"
+                  placeholder="Enter your password"
+                  autocomplete="current-password"
+                  required
+                />
+                <button type="button" class="password-toggle" data-password-toggle="passwordInput" aria-label="Show password">👁</button>
+              </div>
             </label>
 
             <div class="login-row">
@@ -53,9 +56,11 @@
                 <input type="checkbox" id="rememberMe" />
                 <span>Remember this email</span>
               </label>
-              <button type="button" id="useDemoUser" class="text-button">
-                Use demo user
-              </button>
+              <div class="login-row__links">
+                <button type="button" id="openForgotPasswordButton" class="text-button">
+                  Forgot password?
+                </button>
+              </div>
             </div>
 
             <button type="submit" class="button button--primary">
@@ -115,6 +120,14 @@
               </span>
               <span>Approvals</span>
             </button>
+            <button type="button" class="sidebar-link" data-view="compliance">
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M19 3h-4.18A3 3 0 0 0 12 1a3 3 0 0 0-2.82 2H5a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Zm-7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2Zm-2 14-3.5-3.5 1.41-1.41L10 14.17l4.59-4.58L16 11l-6 6Z"></path>
+                </svg>
+              </span>
+              <span>Compliance Report</span>
+            </button>
             <button type="button" class="sidebar-link" data-view="buddy">
               <span class="sidebar-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" focusable="false">
@@ -122,6 +135,14 @@
                 </svg>
               </span>
               <span>Buddy Coverage</span>
+            </button>
+            <button type="button" class="sidebar-link" data-view="contacts">
+              <span class="sidebar-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.02-.24c1.12.37 2.33.57 3.57.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C10.4 21 3 13.6 3 4.5a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.24.2 2.45.57 3.57a1 1 0 0 1-.25 1.02z"></path>
+                </svg>
+              </span>
+              <span>Contact Directory</span>
             </button>
           </nav>
 
@@ -131,6 +152,9 @@
               <strong id="activeUserName">User</strong>
               <small class="session-chip__note">Use the same MoTrack login for dashboard access.</small>
             </div>
+            <button type="button" id="openChangePasswordButton" class="button button--ghost">
+              Change password
+            </button>
             <button type="button" id="logoutButton" class="button button--ghost">
               Log out
             </button>
@@ -172,59 +196,70 @@
             <div id="buddyCoverageBanner" class="buddy-coverage-banner hidden"></div>
 
             <section id="adminDashboardPanel" class="panel role-dashboard hidden">
-              <div class="section-heading section-heading--wrap">
-                <div>
-                  <p class="section-label">Admin Dashboard</p>
-                  <h2 id="adminWelcome">Welcome back, Asha</h2>
-                </div>
-
-                <div class="admin-toolbar">
-                  <label class="toolbar-field toolbar-field--search">
-                    <span>Search task board</span>
-                    <input
-                      type="search"
-                      id="homeSearchInput"
-                      placeholder="Search by task, employee, task ID"
-                    />
-                  </label>
-
-                  <label class="toolbar-field">
-                    <span>Date</span>
-                    <input type="date" id="dashboardDateInput" />
-                  </label>
-
-                  <button
-                    type="button"
-                    id="openAssignTaskButton"
-                    data-open-assign-modal="true"
-                    class="button button--primary"
-                  >
-                    Assign task
-                  </button>
-                </div>
-              </div>
-
-              <div class="board-heading">
-                <div>
-                  <p class="section-label">Task Board</p>
-                  <h3>Assigned by you</h3>
-                </div>
-                <p id="adminBoardMeta" class="board-meta"></p>
-              </div>
-
-              <div id="adminTaskBoard" class="task-board"></div>
-              <div id="adminBoardPagination" class="pagination"></div>
-
               <div id="pantryAlertsSection" class="pantry-alerts-section hidden">
-                <div class="board-heading">
+                <button
+                  type="button"
+                  id="pantryAlertsToggle"
+                  class="board-heading board-heading--toggle"
+                  aria-expanded="false"
+                  aria-controls="pantryAlertsBoard"
+                >
                   <div>
                     <p class="section-label">Pantry Alerts</p>
                     <h3>Quantity mismatches reported by employees</h3>
                   </div>
-                  <p id="pantryAlertsMeta" class="board-meta"></p>
+                  <div class="board-heading__toggle-meta">
+                    <p id="pantryAlertsMeta" class="board-meta"></p>
+                    <span class="board-heading__chevron" aria-hidden="true">▾</span>
+                  </div>
+                </button>
+
+                <div id="pantryAlertsBoard" class="task-board hidden"></div>
+              </div>
+
+              <div id="adminDashboardMain">
+                <div class="section-heading section-heading--wrap">
+                  <div>
+                    <p class="section-label">Admin Dashboard</p>
+                    <h2 id="adminWelcome">Welcome back, Asha</h2>
+                  </div>
+
+                  <div class="admin-toolbar">
+                    <label class="toolbar-field toolbar-field--search">
+                      <span>Search task board</span>
+                      <input
+                        type="search"
+                        id="homeSearchInput"
+                        placeholder="Search by task, employee, task ID"
+                      />
+                    </label>
+
+                    <label class="toolbar-field">
+                      <span>Date</span>
+                      <input type="date" id="dashboardDateInput" />
+                    </label>
+
+                    <button
+                      type="button"
+                      id="openAssignTaskButton"
+                      data-open-assign-modal="true"
+                      class="button button--primary"
+                    >
+                      Assign task
+                    </button>
+                  </div>
                 </div>
 
-                <div id="pantryAlertsBoard" class="task-board"></div>
+                <div class="board-heading">
+                  <div>
+                    <p class="section-label">Task Board</p>
+                    <h3>Assigned by you</h3>
+                  </div>
+                  <p id="adminBoardMeta" class="board-meta"></p>
+                </div>
+
+                <div id="adminTaskBoard" class="task-board"></div>
+                <div id="adminBoardPagination" class="pagination"></div>
               </div>
             </section>
 
@@ -282,7 +317,12 @@
 
               <div id="walkinCustomerBoard" class="task-board"></div>
 
-              <div class="checklist-title">CHECKLIST PENDING TASK</div>
+              <div class="board-heading">
+                <div>
+                  <p class="section-label">Checklist</p>
+                  <h3>Pending tasks</h3>
+                </div>
+              </div>
 
               <div class="employee-task-shell">
                 <div class="employee-task-table-wrap">
@@ -291,6 +331,8 @@
                       <tr>
                         <th>Name</th>
                         <th>Task</th>
+                        <th>Customer</th>
+                        <th>Deal ID</th>
                         <th>Freq</th>
                         <th>Department</th>
                         <th>Planned</th>
@@ -308,12 +350,48 @@
                 <div class="board-heading">
                   <div>
                     <p class="section-label">Approval Needed</p>
-                    <h3>AC filter cleaning checklists awaiting your approval</h3>
+                    <h3>Checklists awaiting your approval</h3>
                   </div>
                   <p id="kamalApprovalMeta" class="board-meta"></p>
                 </div>
 
                 <div id="kamalApprovalBoard" class="task-board"></div>
+              </div>
+
+              <div id="kamalFuelRequestsSection" class="pantry-alerts-section hidden">
+                <div class="board-heading">
+                  <div>
+                    <p class="section-label">Fuel Needed</p>
+                    <h3>Drivers due for a fuel refill</h3>
+                  </div>
+                  <p id="kamalFuelRequestsMeta" class="board-meta"></p>
+                </div>
+
+                <div id="kamalFuelRequestsBoard" class="task-board"></div>
+              </div>
+
+              <div id="dilipApprovalSection" class="pantry-alerts-section hidden">
+                <div class="board-heading">
+                  <div>
+                    <p class="section-label">Approval Needed</p>
+                    <h3>Fuel requests awaiting your approval</h3>
+                  </div>
+                  <p id="dilipApprovalMeta" class="board-meta"></p>
+                </div>
+
+                <div id="dilipApprovalBoard" class="task-board"></div>
+              </div>
+
+              <div id="arunApprovalSection" class="pantry-alerts-section hidden">
+                <div class="board-heading">
+                  <div>
+                    <p class="section-label">Approval Needed</p>
+                    <h3>Checklists awaiting your review</h3>
+                  </div>
+                  <p id="arunApprovalMeta" class="board-meta"></p>
+                </div>
+
+                <div id="arunApprovalBoard" class="task-board"></div>
               </div>
             </section>
           </section>
@@ -426,13 +504,16 @@
 
                 <label class="toolbar-field">
                   <span>Password</span>
-                  <input
-                    type="password"
-                    id="newUserPassword"
-                    placeholder="Set login password"
-                    autocomplete="new-password"
-                    required
-                  />
+                  <div class="password-field">
+                    <input
+                      type="password"
+                      id="newUserPassword"
+                      placeholder="Set login password"
+                      autocomplete="new-password"
+                      required
+                    />
+                    <button type="button" class="password-toggle" data-password-toggle="newUserPassword" aria-label="Show password">👁</button>
+                  </div>
                 </label>
 
                 <div class="add-user-actions">
@@ -442,6 +523,18 @@
                   <p id="addUserMessage" class="message" aria-live="polite"></p>
                 </div>
               </form>
+            </section>
+
+            <section class="panel hidden" id="passwordResetRequestsPanel">
+              <div class="section-heading">
+                <div>
+                  <p class="section-label">Password Resets</p>
+                  <h2>Pending password reset requests</h2>
+                </div>
+                <p id="passwordResetRequestsMeta" class="board-meta"></p>
+              </div>
+
+              <div id="passwordResetRequestsBoard" class="task-board"></div>
             </section>
 
             <section class="panel" id="userDirectoryPanel">
@@ -531,6 +624,9 @@
                 <button type="button" class="tab-button" data-approvals-tab="completed" role="tab">
                   Completed <span id="approvalsCompletedTabCount" class="tab-count"></span>
                 </button>
+                <button type="button" class="tab-button" data-approvals-tab="notcompleted" role="tab">
+                  Not completed <span id="approvalsNotCompletedTabCount" class="tab-count"></span>
+                </button>
                 <button type="button" class="tab-button" data-approvals-tab="approved" role="tab">
                   Approved <span id="approvalsApprovedTabCount" class="tab-count"></span>
                 </button>
@@ -569,6 +665,21 @@
                 <div id="approvalsCompletedPagination" class="pagination"></div>
               </div>
 
+              <div id="approvalsNotCompletedSection" class="hidden">
+                <div class="board-heading">
+                  <div>
+                    <h3>Not completed</h3>
+                  </div>
+                  <p id="approvalsNotCompletedMeta" class="board-meta"></p>
+                </div>
+
+                <div id="approvalsNotCompletedBoard" class="task-board"></div>
+                <div id="approvalsNotCompletedEmpty" class="empty-state hidden">
+                  No "not completed" submissions awaiting review for this date.
+                </div>
+                <div id="approvalsNotCompletedPagination" class="pagination"></div>
+              </div>
+
               <div id="approvalsApprovedSection" class="hidden">
                 <div class="board-heading">
                   <div>
@@ -598,6 +709,60 @@
                 </div>
                 <div id="approvalsLiveList" class="live-location-list"></div>
               </div>
+            </section>
+          </section>
+
+          <section id="compliancePage" class="dashboard-page hidden">
+            <header class="dashboard-header">
+              <div>
+                <p class="eyebrow">Compliance Report</p>
+                <h2>Daily checklist completion</h2>
+                <p class="dashboard-copy">
+                  Every expected checklist from the start date through today, day by day, so gaps in submissions are easy to spot.
+                </p>
+              </div>
+            </header>
+
+            <section class="panel">
+              <div class="section-heading section-heading--wrap">
+                <div>
+                  <p class="section-label">Date Range</p>
+                  <h2>Select a range</h2>
+                </div>
+
+                <div class="toolbar">
+                  <label class="toolbar-field">
+                    <span>From</span>
+                    <input type="date" id="complianceStartDate" />
+                  </label>
+                  <label class="toolbar-field">
+                    <span>To</span>
+                    <input type="date" id="complianceEndDate" />
+                  </label>
+                </div>
+              </div>
+
+              <p id="complianceMeta" class="board-meta"></p>
+              <div id="complianceBoard" class="task-board"></div>
+              <div id="complianceEmptyState" class="empty-state hidden">
+                No checklist activity found for this date range.
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="section-heading section-heading--wrap">
+                <div>
+                  <p class="section-label">Google Sheet Export</p>
+                  <h2>Submission report sheet</h2>
+                  <p class="dashboard-copy">
+                    The sheet only rewrites itself when someone submits a checklist. Use this to push a fresh, continuous copy right now instead of waiting for that.
+                  </p>
+                </div>
+                <button type="button" id="resyncSubmissionReportButton" class="button button--primary">
+                  Resync report now
+                </button>
+              </div>
+              <p id="resyncSubmissionReportMessage" class="message" aria-live="polite"></p>
             </section>
           </section>
 
@@ -686,6 +851,67 @@
               <div id="coverageList" class="coverage-list"></div>
             </section>
           </section>
+
+          <section id="contactsPage" class="dashboard-page hidden">
+            <header class="dashboard-header">
+              <div>
+                <p class="eyebrow">Contact Directory</p>
+                <h2>Company contact details</h2>
+                <p class="dashboard-copy">
+                  Full staff contact list, department, location, and current status.
+                </p>
+              </div>
+            </header>
+
+            <section class="stats-strip">
+              <article class="stat-card">
+                <span>Total contacts</span>
+                <strong id="contactsCount">0</strong>
+              </article>
+            </section>
+
+            <section class="panel">
+              <div class="section-heading section-heading--wrap">
+                <div>
+                  <p class="section-label">Directory</p>
+                  <h2>All contacts</h2>
+                </div>
+
+                <div class="toolbar">
+                  <label class="toolbar-field toolbar-field--search">
+                    <span>Search</span>
+                    <input
+                      type="search"
+                      id="contactsSearchInput"
+                      placeholder="Search by name, department, location, phone"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div class="table-shell">
+                <table class="user-table">
+                  <thead>
+                    <tr>
+                      <th>S.No.</th>
+                      <th>Name</th>
+                      <th>Department / Team</th>
+                      <th>Location</th>
+                      <th>Phone</th>
+                      <th>Remark</th>
+                    </tr>
+                  </thead>
+                  <tbody id="contactsTableBody"></tbody>
+                </table>
+              </div>
+
+              <div id="contactsMobileCards" class="mobile-cards"></div>
+              <div id="contactsEmptyState" class="empty-state hidden">
+                No contacts match the current search.
+              </div>
+              <div id="contactsPagination" class="pagination"></div>
+            </section>
+          </section>
           </div>
         </main>
       </section>
@@ -764,6 +990,17 @@
             <input type="text" id="assignTaskId" readonly />
           </label>
 
+          <label class="toolbar-field">
+            <span>Sequence</span>
+            <input
+              type="number"
+              id="assignTaskSequence"
+              min="1"
+              step="1"
+              placeholder="Order within the checklist (e.g. 1)"
+            />
+          </label>
+
           <label class="toolbar-field toolbar-field--full">
             <span>Task details</span>
             <textarea
@@ -811,6 +1048,154 @@
               Submit checklist
             </button>
             <p id="checklistMessage" class="message" aria-live="polite"></p>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="notCompletedModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Not completed</p>
+            <h2 id="notCompletedTaskTitle">Task</h2>
+          </div>
+          <button
+            type="button"
+            id="closeNotCompletedButton"
+            class="sidebar-close modal-close"
+            aria-label="Close remarks form"
+          >
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z"></path>
+            </svg>
+          </button>
+        </div>
+
+        <form id="notCompletedForm" class="checklist-form">
+          <label class="toolbar-field toolbar-field--full">
+            <span>Why wasn't this completed?</span>
+            <div class="textarea-with-mic">
+              <textarea
+                id="notCompletedRemarks"
+                rows="4"
+                placeholder="Add a remark explaining why this task wasn't completed"
+                required
+              ></textarea>
+              <button
+                type="button"
+                id="notCompletedMicButton"
+                class="mic-button"
+                aria-label="Record a voice note"
+              >
+                🎤
+              </button>
+            </div>
+            <p id="notCompletedVoiceStatus" class="voice-status"></p>
+          </label>
+          <div class="add-user-actions">
+            <button type="submit" class="button button--primary">
+              Submit remark
+            </button>
+            <p id="notCompletedMessage" class="message" aria-live="polite"></p>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="changePasswordModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Account</p>
+            <h2>Change password</h2>
+          </div>
+          <button
+            type="button"
+            id="closeChangePasswordModalButton"
+            class="sidebar-close modal-close"
+            aria-label="Close change password form"
+          >
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z"></path>
+            </svg>
+          </button>
+        </div>
+
+        <form id="changePasswordForm" class="checklist-form">
+          <label class="toolbar-field toolbar-field--full">
+            <span>New password</span>
+            <div class="password-field">
+              <input
+                type="password"
+                id="newPasswordInput"
+                autocomplete="new-password"
+                placeholder="Enter a new password"
+                minlength="6"
+                required
+              />
+              <button type="button" class="password-toggle" data-password-toggle="newPasswordInput" aria-label="Show password">👁</button>
+            </div>
+          </label>
+          <label class="toolbar-field toolbar-field--full">
+            <span>Confirm new password</span>
+            <div class="password-field">
+              <input
+                type="password"
+                id="confirmNewPasswordInput"
+                autocomplete="new-password"
+                placeholder="Re-enter the new password"
+                minlength="6"
+                required
+              />
+              <button type="button" class="password-toggle" data-password-toggle="confirmNewPasswordInput" aria-label="Show password">👁</button>
+            </div>
+          </label>
+          <div class="add-user-actions">
+            <button type="submit" class="button button--primary">
+              Update password
+            </button>
+            <p id="changePasswordMessage" class="message" aria-live="polite"></p>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="forgotPasswordModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Account</p>
+            <h2>Forgot password</h2>
+            <p class="dashboard-copy">Enter your work email — Asha will see your request and reset it for you.</p>
+          </div>
+          <button
+            type="button"
+            id="closeForgotPasswordButton"
+            class="sidebar-close modal-close"
+            aria-label="Close forgot password form"
+          >
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z"></path>
+            </svg>
+          </button>
+        </div>
+
+        <form id="forgotPasswordForm" class="checklist-form">
+          <label class="toolbar-field toolbar-field--full">
+            <span>Work email</span>
+            <input
+              type="email"
+              id="forgotPasswordEmail"
+              placeholder="name@company.com"
+              required
+            />
+          </label>
+          <div class="add-user-actions">
+            <button type="submit" class="button button--primary">
+              Send request
+            </button>
+            <p id="forgotPasswordMessage" class="message" aria-live="polite"></p>
           </div>
         </form>
       </div>

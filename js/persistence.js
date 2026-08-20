@@ -319,6 +319,29 @@ const SHARED_INSTALLER_TASK_TEMPLATES = Object.freeze([
     department: "installer",
     details: "Morning Reading.",
   },
+  {
+    key: "vehicle-cleaning",
+    title: "Vehicle Cleaning",
+    frequency: "daily",
+    department: "installer",
+    details: "Vehicle Cleaning",
+  },
+  {
+    key: "vehicle-service-2w",
+    title: "Vehicle service for 2 wheelers",
+    frequency: "every_3_months",
+    department: "installer",
+    details: "Vehicle service for 2 wheelers",
+    vehicleType: "Two Wheeler",
+  },
+  {
+    key: "vehicle-service-4w",
+    title: "Vehicle service for 4 wheelers",
+    frequency: "every_3_months",
+    department: "installer",
+    details: "Vehicle service for 4 wheelers",
+    vehicleType: "Four Wheeler",
+  },
 ]);
 
 const LEGACY_REQUIRED_TASK_CLEANUPS = Object.freeze([
@@ -350,8 +373,18 @@ function isSharedInstallerTaskTitle(value) {
   return SHARED_INSTALLER_TASK_TEMPLATES.some((template) => normalizeRequiredTaskTitle(template.title) === normalizedTitle);
 }
 
-function isGeneratedSharedInstallerTaskId(taskId) {
-  return String(taskId || "").trim().toUpperCase().startsWith("INSTALLER-");
+// IDs are now the same "XXXX-NNNNNN" shape as any manually-assigned task, so
+// a prefix check can't tell a generated one apart from a legacy duplicate —
+// instead recompute what this user's ID would be for each template and look
+// for an exact match.
+function isGeneratedSharedInstallerTaskId(taskId, user) {
+  if (!user) {
+    return false;
+  }
+  const normalizedId = String(taskId || "").trim().toUpperCase();
+  return SHARED_INSTALLER_TASK_TEMPLATES.some(
+    (template) => buildInstallerTaskId(user, template).toUpperCase() === normalizedId
+  );
 }
 
 function shouldRemoveLegacyInstallerSharedTask(task, users) {
@@ -366,32 +399,72 @@ function shouldRemoveLegacyInstallerSharedTask(task, users) {
   if (!isSharedInstallerTaskTitle(task?.title)) {
     return false;
   }
-  return !isGeneratedSharedInstallerTaskId(task?.taskId || task?.id);
+  const user = assignee || { email: task?.assigneeEmail, name: task?.assigneeName };
+  return !isGeneratedSharedInstallerTaskId(task?.taskId || task?.id, user);
+}
+
+// A plain Date.now()-based code (like createTaskCode) would mint a new ID
+// every reload since these tasks are regenerated from the template list each
+// session rather than stored as rows — this needs to land on the exact same
+// digits every time for the same user+template, or a completion recorded
+// against today's ID would show as still-pending under tomorrow's.
+function stableNumericId(input, length = 6) {
+  let hash = 5381;
+  const str = String(input);
+  for (let i = 0; i < str.length; i += 1) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) >>> 0;
+  }
+  return String(hash % 10 ** length).padStart(length, "0");
 }
 
 function buildInstallerTaskId(user, template) {
-  const emailSlug = String(user?.email || user?.name || "installer")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return `INSTALLER-${emailSlug}-${template.key}`.toUpperCase();
+  const base = String(user?.name || user?.email || "installer")
+    .replace(/[^a-z0-9]/gi, "")
+    .toUpperCase()
+    .slice(0, 4) || "INST";
+  const identityKey = String(user?.email || user?.name || "installer").trim().toLowerCase();
+  const digits = stableNumericId(`${identityKey}::${template.key}`);
+  return `${base}-${digits}`;
+}
+
+// VEHICLE_ASSIGNMENTS is the same local directory the active user's own
+// vehicle-assignment lookup checks first (see fetchVehicleAssignmentForActiveUser)
+// — matched by email, falling back to name, since several entries predate
+// having a login email on file.
+function getKnownVehicleTypeForUser(user) {
+  const email = String(user?.email || "").trim().toLowerCase();
+  const match = VEHICLE_ASSIGNMENTS.find((entry) => {
+    const entryEmail = String(entry.email || "").trim().toLowerCase();
+    if (entryEmail && entryEmail === email) {
+      return true;
+    }
+    const names = Array.isArray(entry.names) ? entry.names : [];
+    return names.some((name) => normalizePersonName(name) === normalizePersonName(user?.name));
+  });
+  return match?.vehicleType || null;
 }
 
 function getSharedInstallerTaskDefinitions(users) {
   return (Array.isArray(users) ? users : [])
     .filter(isInstallerUser)
-    .flatMap((user) =>
-      SHARED_INSTALLER_TASK_TEMPLATES.map((template) => ({
-        taskId: buildInstallerTaskId(user, template),
-        assigneeName: user.name,
-        assigneeEmail: user.email,
-        title: template.title,
-        frequency: template.frequency,
-        department: template.department,
-        details: template.details,
-      }))
-    );
+    .flatMap((user) => {
+      const vehicleType = getKnownVehicleTypeForUser(user);
+      return SHARED_INSTALLER_TASK_TEMPLATES
+        // Templates tagged with a vehicleType only apply to installers whose
+        // known vehicle matches — an installer with no known assignment gets
+        // neither the 2-wheeler nor the 4-wheeler service task rather than a
+        // guessed one.
+        .filter((template) => !template.vehicleType || template.vehicleType === vehicleType)
+        .map((template) => ({
+          taskId: buildInstallerTaskId(user, template),
+          assigneeName: user.name,
+          assigneeEmail: user.email,
+          title: template.title,
+          frequency: template.frequency,
+          department: template.department,
+          details: template.details,
+        }));
+    });
 }
 
 function getRequiredOperationalTasks(users) {
@@ -615,6 +688,9 @@ async function bootstrapState() {
   // inherently transient, there's nothing meaningful to preserve offline.
   state.liveLocations =
     server?.liveLocations && typeof server.liveLocations === "object" ? server.liveLocations : {};
+  // Same reasoning as liveLocations — these are server-mediated requests,
+  // not something any one browser needs to cache offline.
+  state.passwordResetRequests = Array.isArray(server?.passwordResetRequests) ? server.passwordResetRequests : [];
 }
 
 
@@ -692,6 +768,9 @@ async function refreshStateFromServer() {
   }
   if (server.liveLocations && typeof server.liveLocations === "object") {
     state.liveLocations = server.liveLocations;
+  }
+  if (Array.isArray(server.passwordResetRequests)) {
+    state.passwordResetRequests = server.passwordResetRequests;
   }
 }
 

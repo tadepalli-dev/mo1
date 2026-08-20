@@ -6,6 +6,7 @@ const { DatabaseSync } = require("node:sqlite");
 const { appendChecklistSubmission, syncUsersSheet } = require("./lib/checklist-sheet-export");
 const { getServiceAccountEmail, lookupVehicleAssignment } = require("./lib/vehicle-sheet-directory");
 const { rewriteSubmissionReport } = require("./lib/submission-report-export");
+const { buildSubmissionAuditRows } = require("./lib/submission-audit");
 
 const DEFAULT_PORT = Number(process.env.PORT) || 3000;
 const ROOT = __dirname;
@@ -16,6 +17,12 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const db = new DatabaseSync(path.join(DATA_DIR, "motrack.db"));
+// Without this, a second short-lived connection to the same file (e.g. a
+// one-off migration script run while the server is up) can hit the write
+// lock and get SQLITE_BUSY immediately, crashing the server on an uncaught
+// exception instead of just waiting the few ms it takes the other writer
+// to finish.
+db.exec(`PRAGMA busy_timeout = 5000`);
 db.exec(`
   CREATE TABLE IF NOT EXISTS kv_store (
     key TEXT PRIMARY KEY,
@@ -76,7 +83,7 @@ function getBearerToken(request) {
   return match ? match[1].trim() : null;
 }
 
-const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations"];
+const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests"];
 const STORE_DEFAULTS = {
   users: [],
   tasks: [],
@@ -85,6 +92,7 @@ const STORE_DEFAULTS = {
   absences: {},
   pantryAlerts: [],
   liveLocations: {},
+  passwordResetRequests: [],
 };
 
 const getStoreStatement = db.prepare("SELECT value FROM kv_store WHERE key = ?");
@@ -669,6 +677,58 @@ const server = http.createServer((request, response) => {
     return;
   }
 
+  // Public (no session token) since the person submitting this hasn't
+  // logged in yet — admin-mediated reset: this just queues a request for
+  // Asha to see and action, there's no email service to send a reset link.
+  if (request.url === "/api/forgot-password" && request.method === "POST") {
+    setCorsHeaders(response, request);
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 1024 * 1024) {
+        request.destroy();
+      }
+    });
+    request.on("end", () => {
+      let payload;
+      try {
+        payload = JSON.parse(body);
+      } catch (error) {
+        response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: false, reason: "invalid_request" }));
+        return;
+      }
+
+      const email = String(payload.email || "").trim().toLowerCase();
+      const users = readUsersWithPasswords();
+      const matchedUser = users.find((user) => String(user.email || "").toLowerCase() === email);
+
+      if (!matchedUser) {
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: false, reason: "not_found" }));
+        return;
+      }
+
+      const requests = readStoreValue("passwordResetRequests");
+      const alreadyPending = requests.some(
+        (item) => String(item.email || "").toLowerCase() === email && !item.resolvedAt
+      );
+      if (!alreadyPending) {
+        requests.push({
+          email: matchedUser.email,
+          name: matchedUser.name,
+          requestedAt: new Date().toISOString(),
+          resolvedAt: null,
+        });
+        writeStoreValue("passwordResetRequests", requests);
+      }
+
+      response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: true }));
+    });
+    return;
+  }
+
   if (request.url === "/api/logout" && request.method === "POST") {
     setCorsHeaders(response, request);
     deleteSession(getBearerToken(request));
@@ -706,8 +766,15 @@ const server = http.createServer((request, response) => {
       return;
     }
 
-    parseJsonBody(request, 4 * 1024 * 1024)
-      .then((payload) => rewriteSubmissionReport(ROOT, Array.isArray(payload.rows) ? payload.rows : []))
+    // Rows are computed here from the store's own data, not trusted from the
+    // client — see lib/submission-audit.js for why.
+    Promise.resolve()
+      .then(() => {
+        const tasks = readStoreValue("tasks");
+        const completions = readStoreValue("completions");
+        return buildSubmissionAuditRows(tasks, completions);
+      })
+      .then((rows) => rewriteSubmissionReport(ROOT, rows))
       .then((result) => {
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify(result));
