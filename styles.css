@@ -990,6 +990,15 @@ textarea {
   text-align: left;
 }
 
+/* Customer/Deal ID only ever have data for salesmen (walk-in attribution) —
+   hidden for every other role so the table isn't full of "-" columns. */
+.employee-task-table.hide-customer-columns th:nth-child(3),
+.employee-task-table.hide-customer-columns td:nth-child(3),
+.employee-task-table.hide-customer-columns th:nth-child(4),
+.employee-task-table.hide-customer-columns td:nth-child(4) {
+  display: none;
+}
+
 .freq-pill {
   display: inline-flex;
   align-items: center;
@@ -1878,6 +1887,19 @@ textarea {
   .modal-card {
     padding: 1.15rem;
     border-radius: 24px;
+  }
+
+  .employee-task-table th {
+    font-size: 0.92rem;
+  }
+
+  .employee-task-table td {
+    font-size: 1.05rem;
+  }
+
+  .employee-task-table .status-select,
+  .employee-task-table .status-button {
+    font-size: 1rem;
   }
 }
 

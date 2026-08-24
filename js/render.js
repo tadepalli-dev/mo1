@@ -927,6 +927,11 @@ function renderEmployeeTaskBoard() {
     return;
   }
 
+  const taskTable = elements.employeeTaskTableBody.closest(".employee-task-table");
+  if (taskTable) {
+    taskTable.classList.toggle("hide-customer-columns", state.activeUser.role !== "salesman");
+  }
+
   renderWalkinCustomerBoard();
 
   const myOwnTasks = state.tasks.filter(
@@ -997,8 +1002,9 @@ function renderEmployeeTaskBoard() {
 
   if (!displayOccurrences.length) {
     const emptyRow = document.createElement("tr");
-    emptyRow.innerHTML = `<td colspan="9">No assigned tasks are visible for the selected filters.</td>`;
+    emptyRow.innerHTML = `<td colspan="7">No assigned tasks are visible for the selected filters.</td>`;
     elements.employeeTaskTableBody.append(emptyRow);
+    sessionStorage.setItem("visibleTaskIds", JSON.stringify([]));
     return;
   }
 
@@ -1017,6 +1023,10 @@ function renderEmployeeTaskBoard() {
   pageOccurrences.forEach((task) => {
     elements.employeeTaskTableBody.append(createEmployeeTaskRow(task));
   });
+
+  // Task ID is no longer shown as a table column — kept in sessionStorage
+  // instead, purely so it's still inspectable via DevTools if ever needed.
+  sessionStorage.setItem("visibleTaskIds", JSON.stringify(pageOccurrences.map((task) => task.taskId || task.id)));
 
   renderEmployeeTaskPagination(totalPages);
 }
@@ -2630,9 +2640,7 @@ function createEmployeeTaskRow(task) {
     <td>${escapeHtml(task.customerAttributionName || task.customerName || "-")}</td>
     <td>${escapeHtml(task.customerAttributionKey || task.walkinId || "-")}</td>
     <td><span class="freq-pill">${escapeHtml(getFrequencyShortLabel(getTaskDisplayFrequency(task)))}</span></td>
-    <td>${escapeHtml(normalizeValue(task.department))}</td>
     <td>${escapeHtml(formatTaskDate(task))}</td>
-    <td>${escapeHtml(task.taskId || task.id)}</td>
     <td>
       ${
         completion
