@@ -1394,24 +1394,24 @@ function handleKamalApprovalAction(event) {
 }
 
 
-function handleDilipApprovalAction(event) {
-  const trigger = event.target.closest("[data-dilip-approve-completion]");
+function handleFuelRequestApprovalAction(event) {
+  const trigger = event.target.closest("[data-fuel-approve-completion]");
   if (!trigger) {
     return;
   }
 
-  const completionKey = trigger.getAttribute("data-dilip-approve-completion");
+  const completionKey = trigger.getAttribute("data-fuel-approve-completion");
   const completion = state.completions[completionKey];
   if (!completion) {
     return;
   }
 
-  completion.cashierApprovalStatus = "approved";
-  completion.cashierApprovedByName = state.activeUser.name;
-  completion.cashierApprovedAt = new Date().toISOString();
+  completion.fuelRequestApprovalStatus = "approved";
+  completion.fuelRequestApprovedByName = state.activeUser.name;
+  completion.fuelRequestApprovedAt = new Date().toISOString();
 
   saveCompletions();
-  renderDilipApprovalPanel();
+  renderFuelApprovalPanel();
   renderApprovalsPage();
 }
 
@@ -1474,6 +1474,12 @@ function handleNotCompletedModalBackdropClick(event) {
 
 
 function handleEmployeeTaskAction(event) {
+  const requestTrigger = event.target.closest("[data-request-fuel-task]");
+  if (requestTrigger) {
+    handleFuelRequestSubmit(requestTrigger);
+    return;
+  }
+
   const trigger = event.target.closest("[data-complete-task]");
   if (!trigger) {
     return;
@@ -1489,6 +1495,36 @@ function handleEmployeeTaskAction(event) {
   }
 
   openChecklistModal(task);
+}
+
+// No modal, no data entry — requesting fuel is itself the whole submission.
+// Either approver (Dilip or Ashish Yadav) can then approve it from their
+// own dashboard, at which point it shows as completed like any other task.
+function handleFuelRequestSubmit(trigger) {
+  const taskKey = trigger.getAttribute("data-task-key");
+  const task =
+    state.visibleEmployeeTasks.find((item) => getTaskOccurrenceIdentity(item) === taskKey) ||
+    state.visibleWalkinTasks.find((item) => getTaskOccurrenceIdentity(item) === taskKey);
+
+  if (!task || !isTaskCompletionEnabled(task)) {
+    return;
+  }
+
+  const completionKey = getCompletionKey(task);
+  state.completions[completionKey] = {
+    taskId: task.taskId || task.id,
+    occurrenceDate: task.occurrenceDate || task.plannedDate,
+    submittedAt: new Date().toISOString(),
+    responses: {},
+    approvalStatus: "pending",
+    fuelRequestApprovalStatus: "pending",
+    submittedByName: state.activeUser.name,
+    submittedByEmail: state.activeUser.email,
+  };
+
+  saveCompletions();
+  renderEmployeeTaskBoard();
+  renderApprovalsPage();
 }
 
 
@@ -1515,10 +1551,26 @@ function handleEmployeeStatusSelectChange(event) {
   }
 
   if (value === "completed") {
+    if (isClientFormTask(task)) {
+      openClientFormForTask(task);
+    }
     openChecklistModal(task);
   } else if (value === "not_completed") {
     openNotCompletedModal(task);
   }
+}
+
+// Opens the real client intake form in a new tab (for the showroom TV) when
+// a salesman marks the "Take input of customer requirement" task complete.
+// Purely additive — the normal completion modal above still runs as usual.
+function openClientFormForTask(task) {
+  const params = new URLSearchParams({
+    walkinId: task.customerAttributionKey || task.walkinId || "",
+    customerName: task.customerAttributionName || task.customerName || "",
+    submittedByName: state.activeUser?.name || "",
+    submittedByEmail: state.activeUser?.email || "",
+  });
+  window.open(`/client-form.html?${params.toString()}`, "_blank");
 }
 
 

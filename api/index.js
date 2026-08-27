@@ -18,6 +18,12 @@ const BUNDLED_SHEETS_SECRET_PATH = path.join(BUNDLED_DATA_DIR, "sheets-feed-secr
 const TMP_SHEETS_SECRET_PATH = path.join(TMP_DATA_DIR, "sheets-feed-secret.txt");
 const SERVICE_ACCOUNT_PATH = path.join(ROOT, "service-account-key.json");
 const FIRESTORE_STORE_COLLECTION = "motrack_store";
+// Client form submissions get their own Firestore collection (one document
+// per submission) rather than a STORE_KEYS array, because a shared array
+// eventually exceeds Firestore's ~1MB per-field limit — the exact failure
+// hit earlier with the "tasks" store key. A collection only grows in
+// document count, never in per-document size, so that ceiling can't recur.
+const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
 
 const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests"];
 const STORE_DEFAULTS = {
@@ -720,6 +726,58 @@ async function handleStoreRoute(request, response, key) {
   sendJson(response, 405, { error: "Method not allowed" });
 }
 
+// No session check — this is filled in by a walk-in customer on the
+// showroom TV, not a logged-in staff member, so there's no session token to
+// check (same reasoning as /api/login itself being open).
+async function handleClientFormSubmissionCreate(request, response) {
+  const firestoreDb = getFirestoreDb();
+  if (!firestoreDb) {
+    sendJson(response, 500, { ok: false, error: "Form storage is not configured on this server." });
+    return;
+  }
+
+  let payload;
+  try {
+    payload = await parseJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { ok: false, error: "Invalid JSON body" });
+    return;
+  }
+
+  const submission = { ...payload, submittedAt: new Date().toISOString() };
+  try {
+    const docRef = await firestoreDb.collection(CLIENT_FORM_SUBMISSIONS_COLLECTION).add(submission);
+    sendJson(response, 200, { ok: true, id: docRef.id });
+  } catch (error) {
+    sendJson(response, 500, { ok: false, error: error.message || "Could not save the submission." });
+  }
+}
+
+async function handleClientFormSubmissionList(request, response) {
+  if (!isAuthorized(request)) {
+    sendJson(response, 401, { ok: false, error: "Unauthorized. Please sign in again." });
+    return;
+  }
+
+  const firestoreDb = getFirestoreDb();
+  if (!firestoreDb) {
+    sendJson(response, 500, { ok: false, error: "Form storage is not configured on this server." });
+    return;
+  }
+
+  try {
+    const snapshot = await firestoreDb
+      .collection(CLIENT_FORM_SUBMISSIONS_COLLECTION)
+      .orderBy("submittedAt", "desc")
+      .limit(200)
+      .get();
+    const submissions = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    sendJson(response, 200, { ok: true, submissions });
+  } catch (error) {
+    sendJson(response, 500, { ok: false, error: error.message || "Could not load submissions." });
+  }
+}
+
 async function handler(request, response) {
   try {
     if (request.method === "OPTIONS") {
@@ -848,6 +906,16 @@ async function handler(request, response) {
       }
 
       sendJson(response, 200, getChecklistQuestionsForTitle(requestUrl.searchParams.get("title") || ""));
+      return;
+    }
+
+    if (pathname === "/api/client-form-submissions" && request.method === "POST") {
+      await handleClientFormSubmissionCreate(request, response);
+      return;
+    }
+
+    if (pathname === "/api/client-form-submissions" && request.method === "GET") {
+      await handleClientFormSubmissionList(request, response);
       return;
     }
 

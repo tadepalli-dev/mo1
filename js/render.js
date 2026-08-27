@@ -45,7 +45,7 @@ function renderHomeDashboard() {
   renderPantryAlertsPanel();
   renderKamalApprovalPanel();
   renderKamalFuelRequestsPanel();
-  renderDilipApprovalPanel();
+  renderFuelApprovalPanel();
   renderArunApprovalPanel();
   renderBuddyCoverageBanner();
 }
@@ -269,33 +269,33 @@ function createKamalApprovalCard(entry) {
 }
 
 
-function renderDilipApprovalPanel() {
-  if (!elements.dilipApprovalSection) {
+function renderFuelApprovalPanel() {
+  if (!elements.fuelApprovalSection) {
     return;
   }
 
-  const isDilip = state.activeUser?.email?.toLowerCase() === "dilip.gupta@curtainsandcarpets.com";
-  elements.dilipApprovalSection.classList.toggle("hidden", !isDilip);
-  if (!isDilip) {
+  const isFuelApprover = isFuelRequestApprover(state.activeUser?.email);
+  elements.fuelApprovalSection.classList.toggle("hidden", !isFuelApprover);
+  if (!isFuelApprover) {
     return;
   }
 
-  const pendingEntries = getPendingCashierApprovalEntries();
-  elements.dilipApprovalMeta.textContent = `${pendingEntries.length} fuel request${pendingEntries.length === 1 ? "" : "s"} awaiting your approval`;
-  elements.dilipApprovalBoard.innerHTML = "";
+  const pendingEntries = getPendingFuelRequestApprovalEntries();
+  elements.fuelApprovalMeta.textContent = `${pendingEntries.length} fuel request${pendingEntries.length === 1 ? "" : "s"} awaiting your approval`;
+  elements.fuelApprovalBoard.innerHTML = "";
 
   if (!pendingEntries.length) {
-    elements.dilipApprovalBoard.append(createEmptyState("No fuel requests are waiting for your approval."));
+    elements.fuelApprovalBoard.append(createEmptyState("No fuel requests are waiting for your approval."));
     return;
   }
 
   pendingEntries.forEach((entry) => {
-    elements.dilipApprovalBoard.append(createDilipApprovalCard(entry));
+    elements.fuelApprovalBoard.append(createFuelApprovalCard(entry));
   });
 }
 
 
-function createDilipApprovalCard(entry) {
+function createFuelApprovalCard(entry) {
   const { completion, task } = entry;
   const card = document.createElement("article");
   card.className = "task-card task-card--alert";
@@ -307,10 +307,9 @@ function createDilipApprovalCard(entry) {
       <span class="task-badge task-badge--alert">Awaiting your approval</span>
     </div>
     <div class="task-card__meta">
-      <span>Vehicle ${escapeHtml(completion.responses?.vehicle_number || "-")} · Fuel ${escapeHtml(String(completion.responses?.fuel_amount ?? "-"))} L</span>
-      <span>Mileage ${escapeHtml(Number.isFinite(completion.fuelMileage) ? completion.fuelMileage.toFixed(1) : "-")} km/l (threshold ${escapeHtml(String(completion.fuelMileageThreshold ?? "-"))}) · ${escapeHtml(formatDateValue(completion.occurrenceDate))}</span>
+      <span>Requested ${escapeHtml(formatDateValue(completion.occurrenceDate))}</span>
     </div>
-    <button type="button" class="button button--primary" data-dilip-approve-completion="${escapeHtml(entry.key)}">Approve</button>
+    <button type="button" class="button button--primary" data-fuel-approve-completion="${escapeHtml(entry.key)}">Approve</button>
   `;
   return card;
 }
@@ -461,7 +460,8 @@ function renderApprovalsPage() {
       entry.completion.kamalApprovalStatus !== "pending" &&
       entry.completion.hrApprovalStatus !== "pending" &&
       entry.completion.cashierApprovalStatus !== "pending" &&
-      entry.completion.arunApprovalStatus !== "pending"
+      entry.completion.arunApprovalStatus !== "pending" &&
+      entry.completion.fuelRequestApprovalStatus !== "pending"
   );
   const completed = visibleEntries.filter(
     (entry) => entry.completion.approvalStatus !== "approved" && entry.completion.status !== "not_completed"
@@ -2634,24 +2634,37 @@ function createEmployeeTaskRow(task) {
     buttonLabel = `Locations (${doneCount}/${EARTHING_CLEANING_LOCATIONS.length})`;
   }
 
+  const isFuelRequest = isFuelRequestTask(task);
+  const fuelApproved = isFuelRequest && completion?.fuelRequestApprovalStatus === "approved";
+  const displayTitle = fuelApproved ? "Fuel checklist" : getTaskDisplayTitle(task);
+
+  let actionCell;
+  if (isFuelRequest) {
+    if (!completion) {
+      actionCell = `<button type="button" class="status-button" data-request-fuel-task="true" data-task-key="${escapeHtml(getTaskOccurrenceIdentity(task))}">Request</button>`;
+    } else if (fuelApproved) {
+      actionCell = createCompletionStatusBadge(completion);
+    } else {
+      actionCell = `<span class="status-badge status-badge--pending">Awaiting approval</span>`;
+    }
+  } else if (completion) {
+    actionCell = createCompletionStatusBadge(completion);
+  } else if (isMultiStepTask) {
+    actionCell = availability.enabled
+      ? `<button type="button" class="status-button" data-complete-task="true" data-task-key="${escapeHtml(getTaskOccurrenceIdentity(task))}">${escapeHtml(buttonLabel)}</button>`
+      : `<button type="button" class="status-button" disabled title="${escapeHtml(availability.reason)}">${escapeHtml(buttonLabel)}</button>`;
+  } else {
+    actionCell = createTaskStatusSelect(task, availability);
+  }
+
   row.innerHTML = `
     <td>${escapeHtml(task.coverageSourceName || task.assigneeName || state.activeUser?.name || "-")}</td>
-    <td>${escapeHtml(getTaskDisplayTitle(task))}</td>
+    <td>${escapeHtml(displayTitle)}</td>
     <td>${escapeHtml(task.customerAttributionName || task.customerName || "-")}</td>
     <td>${escapeHtml(task.customerAttributionKey || task.walkinId || "-")}</td>
     <td><span class="freq-pill">${escapeHtml(getFrequencyShortLabel(getTaskDisplayFrequency(task)))}</span></td>
     <td>${escapeHtml(formatTaskDate(task))}</td>
-    <td>
-      ${
-        completion
-          ? createCompletionStatusBadge(completion)
-          : isMultiStepTask
-            ? availability.enabled
-              ? `<button type="button" class="status-button" data-complete-task="true" data-task-key="${escapeHtml(getTaskOccurrenceIdentity(task))}">${escapeHtml(buttonLabel)}</button>`
-              : `<button type="button" class="status-button" disabled title="${escapeHtml(availability.reason)}">${escapeHtml(buttonLabel)}</button>`
-            : createTaskStatusSelect(task, availability)
-      }
-    </td>
+    <td>${actionCell}</td>
   `;
   return row;
 }

@@ -1062,6 +1062,11 @@ textarea {
   cursor: help;
 }
 
+.status-badge--pending {
+  background: rgba(201, 138, 27, 0.14);
+  color: #9b6b1a;
+}
+
 .status-select {
   min-height: 2.5rem;
   padding: 0.55rem 2rem 0.55rem 1rem;

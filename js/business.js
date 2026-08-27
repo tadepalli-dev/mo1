@@ -15,6 +15,14 @@ function isGeneratorChecklistTask(task) {
   return normalizeTaskTitle(task?.title).includes("generator checklist");
 }
 
+// .includes(...) rather than an exact match — the walk-in-cloned copy of
+// this task has the customer's name appended (e.g. "...on T.V for Pallavi
+// Mittal"), and scripts/sync-walkins.js and
+// scripts/fix-salesman-checklist-gaps.js don't agree on a trailing period.
+function isClientFormTask(task) {
+  return normalizeTaskTitle(task?.title).includes("take input of customer requirement");
+}
+
 function buildGeneratorChecklistTemplate(generatorUnit) {
   const baseTemplate = CHECKLIST_TEMPLATES["generator checklist"];
   if (!baseTemplate) {
@@ -279,6 +287,30 @@ function getPendingFuelRequests() {
 
 function isFuelChecklistTask(task) {
   return normalizeTaskTitle(task?.title).includes("fuel checklist");
+}
+
+// Replaces the old mileage-computed cashier/HR routing above for this task:
+// no odometer/fuel data is collected up front — requesting fuel is itself
+// the whole submission, and either approver can sign off on it.
+function isFuelRequestTask(task) {
+  return normalizeTaskTitle(task?.title).includes("fuel request");
+}
+
+const FUEL_REQUEST_APPROVER_EMAILS = ["dilip.gupta@curtainsandcarpets.com", "ashish.yadav@curtainsandcarpets.com"];
+
+function isFuelRequestApprover(email) {
+  return FUEL_REQUEST_APPROVER_EMAILS.includes(String(email || "").toLowerCase());
+}
+
+function getPendingFuelRequestApprovalEntries() {
+  return Object.entries(state.completions)
+    .filter(([, completion]) => completion.fuelRequestApprovalStatus === "pending")
+    .map(([key, completion]) => {
+      const task = state.tasks.find((item) => String(item.taskId || item.id) === String(completion.taskId));
+      return task ? { key, completion, task } : null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => new Date(right.completion.submittedAt) - new Date(left.completion.submittedAt));
 }
 
 // Needs a prior fill to diff against; a driver's very first-ever submission

@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MO Designs — Client Style & Requirements Form</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold: #C9A84C;
+    --gold-light: #E8C97A;
+    --gold-pale: #F5EDD5;
+    --gold-faint: #FBF7ED;
+    --dark: #1A1208;
+    --dark-mid: #2E2210;
+    --charcoal: #3D3228;
+    --warm-grey: #6B5F52;
+    --cream: #FAF6EE;
+    --white: #FFFFFF;
+    --border: rgba(201,168,76,0.25);
+    --border-strong: rgba(201,168,76,0.55);
+    --green: #4A7C3F;
+    --section-bg: #F7F3EB;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--cream); color:var(--dark); font-family:'Montserrat',sans-serif; font-weight:300; }
+
+  .site-header {
+    background: var(--dark);
+    padding: 36px 60px 28px;
+    border-bottom: 1px solid var(--gold);
+    position: relative; overflow: hidden;
+  }
+  .header-ornament { display:flex; align-items:center; gap:14px; margin-bottom:12px; }
+  .ornament-line { flex:1; height:1px; background: linear-gradient(90deg, transparent, var(--border-strong)); }
+  .ornament-line.right { background: linear-gradient(90deg, var(--border-strong), transparent); }
+  .ornament-diamond { color:var(--gold); font-size:12px; }
+  .brand-tag { font-size:9px; letter-spacing:6px; color:var(--gold); text-transform:uppercase; text-align:center; margin-bottom:8px; }
+  .site-header h1 { font-family:'Cormorant Garamond',serif; font-size:40px; font-weight:300; color:var(--white); letter-spacing:1px; text-align:center; line-height:1.2; }
+  .site-header h1 em { color:var(--gold-light); font-style:italic; }
+  .header-sub { text-align:center; font-size:10px; letter-spacing:3px; color:rgba(255,255,255,0.35); text-transform:uppercase; margin-top:8px; }
+
+  .welcome-banner {
+    background: linear-gradient(135deg, var(--dark-mid) 0%, #1E1A0E 100%);
+    border: 1px solid var(--border-strong); border-left: 3px solid var(--gold);
+    padding: 32px 40px; margin: 40px auto; max-width: 900px; position: relative;
+  }
+  .welcome-banner h2 { font-family:'Cormorant Garamond',serif; font-size:24px; font-weight:300; color:var(--gold-light); margin-bottom:14px; letter-spacing:1px; }
+  .welcome-banner p { font-size:12px; color:rgba(255,255,255,0.7); line-height:1.9; }
+
+  .container { max-width:900px; margin:0 auto; padding:10px 40px 80px; }
+
+  .section-header { display:flex; align-items:center; gap:0; margin: 40px 0 20px; }
+  .section-num { background:var(--dark); color:var(--gold); font-family:'Cormorant Garamond',serif; font-size:20px; width:48px; height:48px; display:flex; align-items:center; justify-content:center; flex-shrink:0; border:1px solid var(--border-strong); }
+  .section-num.cond { background:#2D4A27; color:#8FBF85; }
+  .section-title-block { flex:1; padding:12px 20px; background:var(--dark); border:1px solid var(--border); border-left:none; }
+  .section-title-block.cond { background:#1E3019; border-color:rgba(74,124,63,0.4); }
+  .section-title { font-family:'Cormorant Garamond',serif; font-size:18px; font-weight:400; color:var(--white); letter-spacing:0.5px; }
+  .section-title.cond { color:#B8DFB2; }
+  .section-subtitle { font-size:10px; color:rgba(255,255,255,0.4); letter-spacing:1.5px; text-transform:uppercase; margin-top:3px; }
+
+  .q-card { background:var(--white); border:1px solid var(--border); margin-bottom:14px; }
+  .q-card.conditional { border-left:3px solid var(--green); background: #FAFCFA; }
+  .q-head { display:flex; align-items:stretch; border-bottom:1px solid var(--border); }
+  .q-num { background:var(--dark); color:var(--gold); font-family:'Cormorant Garamond',serif; font-size:16px; width:46px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .q-num.cond { background: #2D4A27; color:#8FBF85; }
+  .q-info { padding:13px 18px; flex:1; }
+  .q-title { font-size:13px; font-weight:500; color:var(--dark); letter-spacing:0.2px; margin-bottom:4px; }
+  .q-tags { display:flex; gap:6px; flex-wrap:wrap; }
+  .tag { font-size:9px; letter-spacing:1.5px; text-transform:uppercase; padding:2px 8px; border-radius:2px; }
+  .tag-req { background:#FDF0E0; color:#9B6B1A; }
+  .tag-opt { background:#F0F0F0; color:#777; }
+  .q-body { padding:16px 18px 16px 64px; }
+
+  .opt-list { list-style:none; }
+  .opt-list li { display:flex; align-items:flex-start; gap:10px; padding:6px 0; border-bottom:1px dashed rgba(201,168,76,0.12); }
+  .opt-list li:last-child { border-bottom:none; }
+  .opt-label { display:flex; align-items:flex-start; gap:10px; font-size:12px; color:var(--charcoal); cursor:pointer; width:100%; line-height:1.5; }
+  .opt-label input { appearance:none; -webkit-appearance:none; width:15px; height:15px; border:1.5px solid var(--gold); border-radius:50%; flex-shrink:0; margin-top:2px; cursor:pointer; position:relative; }
+  .opt-label input[type="checkbox"] { border-radius:3px; }
+  .opt-label input:checked { background:var(--gold); }
+  .opt-label input:checked::after { content:'●'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:7px; color:var(--dark); }
+  .opt-label input[type="checkbox"]:checked::after { content:'✓'; font-size:10px; color:var(--dark); }
+
+  .product-grid { display:grid; grid-template-columns:1fr 1fr; gap:0; }
+  .product-label {
+    display:flex; align-items:center; gap:10px; padding:8px 12px; font-size:12px; color:var(--charcoal);
+    border:1px solid var(--border); margin:-1px 0 0 -1px; background:var(--white); cursor:pointer;
+  }
+  .product-label:hover { background:var(--gold-faint); }
+  .product-label input { appearance:none; -webkit-appearance:none; width:14px; height:14px; border:1.5px solid var(--gold); border-radius:2px; flex-shrink:0; cursor:pointer; position:relative; }
+  .product-label input:checked { background:var(--gold); }
+  .product-label input:checked::after { content:'✓'; position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:9px; color:var(--dark); }
+  .prod-cat { font-size:8px; letter-spacing:1.5px; text-transform:uppercase; color:var(--gold); background:var(--gold-pale); padding:1px 6px; border-radius:2px; margin-left:auto; white-space:nowrap; }
+
+  .text-field { width:100%; padding:10px 12px; border:1px solid var(--border-strong); background:var(--section-bg); font-family:'Montserrat',sans-serif; font-size:13px; color:var(--dark); }
+  .text-field:focus { outline:none; border-color:var(--gold); background:var(--white); }
+  textarea.text-field { resize:vertical; min-height:70px; }
+
+  .branch-note { margin-top:10px; padding:12px 16px; background:#F2F7F1; border:1px solid #B8D4B3; border-left:3px solid var(--green); font-size:11px; color:#2D5A27; line-height:1.7; }
+
+  .cond-section { margin-left:20px; border-left:2px solid rgba(74,124,63,0.3); padding-left:20px; margin-bottom:14px; }
+  .cond-section-label { font-size:9px; letter-spacing:3px; text-transform:uppercase; color:var(--green); margin-bottom:12px; }
+  .hidden { display:none !important; }
+
+  .divider { display:flex; align-items:center; gap:14px; margin:36px 0; }
+  .divider::before,.divider::after { content:''; flex:1; height:1px; background:var(--border); }
+  .divider span { color:var(--gold); font-size:14px; }
+
+  .submit-row { margin-top:40px; text-align:center; }
+  .submit-button {
+    background:var(--gold); color:var(--dark); border:none; padding:16px 48px;
+    font-family:'Montserrat',sans-serif; font-size:12px; font-weight:600; letter-spacing:2px;
+    text-transform:uppercase; cursor:pointer;
+  }
+  .submit-button:hover { background:var(--gold-light); }
+  .submit-button:disabled { opacity:0.6; cursor:not-allowed; }
+  .submit-error { color:#9B2C2C; font-size:12px; margin-top:12px; }
+
+  .thankyou-screen { display:none; max-width:700px; margin:80px auto; padding:50px 40px; text-align:center; background:var(--dark); border:1px solid var(--gold); }
+  .thankyou-screen.active { display:block; }
+  .thankyou-screen h2 { font-family:'Cormorant Garamond',serif; font-size:28px; color:var(--gold-light); margin-bottom:18px; }
+  .thankyou-screen p { font-size:13px; color:rgba(255,255,255,0.75); line-height:1.9; }
+  #formRoot.hidden { display:none !important; }
+
+  @media(max-width:680px){
+    .site-header { padding:24px 20px; }
+    .site-header h1 { font-size:28px; }
+    .container { padding:10px 16px 60px; }
+    .welcome-banner { padding:22px 20px; margin:20px 16px; }
+    .product-grid { grid-template-columns:1fr; }
+    .q-body { padding:14px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="brand-tag">MO Designs · Gurugram Showroom</div>
+  <div class="header-ornament">
+    <div class="ornament-line"></div><div class="ornament-diamond">◆</div><div class="ornament-line right"></div>
+  </div>
+  <h1>Client <em>Style &amp; Requirements</em> Form</h1>
+  <div class="header-sub">Unified Intake · All Product Categories</div>
+</header>
+
+<div id="formRoot">
+  <div class="welcome-banner">
+    <h2>Welcome to MO Designs</h2>
+    <p>To help us curate the most fitting selections for you, we'd love to understand your taste, your space, and your vision. The more you share, the more precisely we can guide you — saving you time and ensuring every piece feels like it was chosen just for you.</p>
+  </div>
+
+  <form id="clientForm" class="container">
+
+    <!-- SECTION I -->
+    <div class="section-header">
+      <div class="section-num">I</div>
+      <div class="section-title-block"><div class="section-title">Your Details</div><div class="section-subtitle">Always shown</div></div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">1</div><div class="q-info"><div class="q-title">Your Full Name</div><div class="q-tags"><span class="tag tag-req">Required</span></div></div></div>
+      <div class="q-body"><input class="text-field" type="text" name="fullName" id="fullNameInput" required></div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">2</div><div class="q-info"><div class="q-title">WhatsApp / Phone Number</div><div class="q-tags"><span class="tag tag-req">Required</span></div></div></div>
+      <div class="q-body"><input class="text-field" type="tel" name="phone" pattern="[0-9]{10}" placeholder="10-digit number" required></div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">3</div><div class="q-info"><div class="q-title">Project Location / Society / Area</div><div class="q-tags"><span class="tag tag-opt">Optional</span></div></div></div>
+      <div class="q-body"><input class="text-field" type="text" name="location" placeholder="e.g. DLF Phase 5 · Sector 42 · Golf Course Road…"></div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">4</div><div class="q-info"><div class="q-title">Are you furnishing a new home or refreshing an existing space?</div><div class="q-tags"><span class="tag tag-req">Required</span></div></div></div>
+      <div class="q-body">
+        <ul class="opt-list">
+          <li><label class="opt-label"><input type="radio" name="homeStage" value="New home / under construction" required>Brand new home / under construction</label></li>
+          <li><label class="opt-label"><input type="radio" name="homeStage" value="Moving into a ready property">Moving into a ready property</label></li>
+          <li><label class="opt-label"><input type="radio" name="homeStage" value="Refreshing specific rooms">Refreshing / updating specific rooms</label></li>
+          <li><label class="opt-label"><input type="radio" name="homeStage" value="One or two specific items">Looking for one or two specific items</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SECTION II -->
+    <div class="divider"><span>◆</span></div>
+    <div class="section-header">
+      <div class="section-num">II</div>
+      <div class="section-title-block"><div class="section-title">What Are You Shopping For?</div><div class="section-subtitle">Select all that apply</div></div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">5</div><div class="q-info"><div class="q-title">Which rooms / areas are part of this project?</div><div class="q-tags"><span class="tag tag-req">Required</span></div></div></div>
+      <div class="q-body">
+        <ul class="opt-list">
+          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="living" name="rooms" value="Living Room">Living Room</label></li>
+          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="bedroom" name="rooms" value="Master Bedroom">Master Bedroom</label></li>
+          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="bedroom" name="rooms" value="Guest Bedroom(s)">Guest Bedroom(s)</label></li>
+          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="dining" name="rooms" value="Dining Area">Dining Area</label></li>
+          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="bathroom" name="rooms" value="Bathroom(s)">Bathroom(s)</label></li>
+          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="living bedroom dining bathroom" name="rooms" value="Entire Home / Villa">Entire Home / Villa</label></li>
+          <li><label class="opt-label"><input type="checkbox" name="rooms" value="Office / Study">Office / Study</label></li>
+          <li><label class="opt-label"><input type="checkbox" name="rooms" value="Just browsing / specific item">Just browsing / specific item</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SECTION III: LIVING -->
+    <div class="cond-section hidden" data-room-section="living">
+      <div class="cond-section-label">Shown because Living Room / Entire Home is selected</div>
+      <div class="section-header">
+        <div class="section-num cond">III</div>
+        <div class="section-title-block cond"><div class="section-title cond">Living Room Products</div><div class="section-subtitle">Select everything you need for this space</div></div>
+      </div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">6</div><div class="q-info"><div class="q-title">Which Living Room items do you require?</div></div></div>
+        <div class="q-body">
+          <div class="product-grid" data-product-group="living">
+            <label class="product-label"><input type="checkbox" name="livingRoomProducts" value="Sofa / Seating">Sofa / Seating<span class="prod-cat">Furniture</span></label>
+            <label class="product-label"><input type="checkbox" name="livingRoomProducts" value="Sofa Fabric (re-upholstery)">Sofa Fabric (re-upholstery)<span class="prod-cat">Fabric</span></label>
+            <label class="product-label"><input type="checkbox" name="livingRoomProducts" value="Sofa Foam / Cushion Foam">Sofa Foam / Cushion Foam<span class="prod-cat">Foam</span></label>
+            <label class="product-label"><input type="checkbox" class="curtain-trigger" name="livingRoomProducts" value="Curtain Fabric">Curtain Fabric<span class="prod-cat">Curtains</span></label>
+            <label class="product-label"><input type="checkbox" class="curtain-trigger" name="livingRoomProducts" value="Sheer Fabric">Sheer Fabric<span class="prod-cat">Curtains</span></label>
+            <label class="product-label"><input type="checkbox" name="livingRoomProducts" value="Blinds">Blinds<span class="prod-cat">Window</span></label>
+            <label class="product-label"><input type="checkbox" class="curtain-trigger" name="livingRoomProducts" value="Custom Curtains (stitched)">Custom Curtains (stitched)<span class="prod-cat">Curtains</span></label>
+            <label class="product-label"><input type="checkbox" name="livingRoomProducts" value="Cushion Covers">Cushion Covers<span class="prod-cat">Soft Furnish</span></label>
+            <label class="product-label"><input type="checkbox" name="livingRoomProducts" value="Carpet / Area Rug">Carpet / Area Rug<span class="prod-cat">Flooring</span></label>
+            <label class="product-label"><input type="checkbox" name="livingRoomProducts" value="Tassel / Trim Accessories">Tassel / Trim Accessories<span class="prod-cat">Accent</span></label>
+            <label class="product-label"><input type="checkbox" name="livingRoomProducts" value="Fabric Protector Treatment">Fabric Protector Treatment<span class="prod-cat">Care</span></label>
+            <label class="product-label"><input type="checkbox" name="livingRoomProducts" value="Door Mat">Door Mat<span class="prod-cat">Flooring</span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION IV: BEDROOM -->
+    <div class="cond-section hidden" data-room-section="bedroom">
+      <div class="cond-section-label">Shown because a Bedroom / Entire Home is selected</div>
+      <div class="section-header">
+        <div class="section-num cond">IV</div>
+        <div class="section-title-block cond"><div class="section-title cond">Bedroom Products</div><div class="section-subtitle">Master &amp; Guest Bedroom</div></div>
+      </div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">7</div><div class="q-info"><div class="q-title">Which Bedroom items do you require?</div></div></div>
+        <div class="q-body">
+          <div class="product-grid" data-product-group="bedroom">
+            <label class="product-label"><input type="checkbox" name="bedroomProducts" value="Bed Frame / Furniture">Bed Frame / Furniture<span class="prod-cat">Furniture</span></label>
+            <label class="product-label"><input type="checkbox" name="bedroomProducts" value="Mattress Foam">Mattress Foam<span class="prod-cat">Foam</span></label>
+            <label class="product-label"><input type="checkbox" class="linen-trigger" name="bedroomProducts" value="Mattress Protector">Mattress Protector<span class="prod-cat">Linen</span></label>
+            <label class="product-label"><input type="checkbox" class="linen-trigger" name="bedroomProducts" value="Bed Cover / Bedspread">Bed Cover / Bedspread<span class="prod-cat">Linen</span></label>
+            <label class="product-label"><input type="checkbox" class="linen-trigger" name="bedroomProducts" value="Bedsheet — Single">Bedsheet — Single<span class="prod-cat">Linen</span></label>
+            <label class="product-label"><input type="checkbox" class="linen-trigger" name="bedroomProducts" value="Bedsheet — Double / King">Bedsheet — Double / King<span class="prod-cat">Linen</span></label>
+            <label class="product-label"><input type="checkbox" class="linen-trigger" name="bedroomProducts" value="Pillow Covers">Pillow Covers<span class="prod-cat">Linen</span></label>
+            <label class="product-label"><input type="checkbox" class="linen-trigger" name="bedroomProducts" value="Blanket">Blanket<span class="prod-cat">Linen</span></label>
+            <label class="product-label"><input type="checkbox" class="linen-trigger" name="bedroomProducts" value="Dohar (light quilt)">Dohar (light quilt)<span class="prod-cat">Linen</span></label>
+            <label class="product-label"><input type="checkbox" class="linen-trigger" name="bedroomProducts" value="Quilt / Comforter">Quilt / Comforter<span class="prod-cat">Linen</span></label>
+            <label class="product-label"><input type="checkbox" class="curtain-trigger" name="bedroomProducts" value="Curtain Fabric">Curtain Fabric<span class="prod-cat">Curtains</span></label>
+            <label class="product-label"><input type="checkbox" class="curtain-trigger" name="bedroomProducts" value="Sheer Fabric">Sheer Fabric<span class="prod-cat">Curtains</span></label>
+            <label class="product-label"><input type="checkbox" class="curtain-trigger" name="bedroomProducts" value="Custom Curtains (stitched)">Custom Curtains (stitched)<span class="prod-cat">Curtains</span></label>
+            <label class="product-label"><input type="checkbox" name="bedroomProducts" value="Blinds">Blinds<span class="prod-cat">Window</span></label>
+            <label class="product-label"><input type="checkbox" name="bedroomProducts" value="Cushion Covers">Cushion Covers<span class="prod-cat">Soft Furnish</span></label>
+            <label class="product-label"><input type="checkbox" name="bedroomProducts" value="Carpet / Bedside Rug">Carpet / Bedside Rug<span class="prod-cat">Flooring</span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION V: BATH -->
+    <div class="cond-section hidden" data-room-section="bathroom">
+      <div class="cond-section-label">Shown because Bathroom / Entire Home is selected</div>
+      <div class="section-header">
+        <div class="section-num cond">V</div>
+        <div class="section-title-block cond"><div class="section-title cond">Bathroom Products</div><div class="section-subtitle">Bath linen, accessories &amp; fittings</div></div>
+      </div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">8</div><div class="q-info"><div class="q-title">Which Bathroom items do you require?</div></div></div>
+        <div class="q-body">
+          <div class="product-grid">
+            <label class="product-label"><input type="checkbox" name="bathroomProducts" value="Bath Towels">Bath Towels<span class="prod-cat">Bath Linen</span></label>
+            <label class="product-label"><input type="checkbox" name="bathroomProducts" value="Hand Towels">Hand Towels<span class="prod-cat">Bath Linen</span></label>
+            <label class="product-label"><input type="checkbox" name="bathroomProducts" value="Bath Mat">Bath Mat<span class="prod-cat">Bath Linen</span></label>
+            <label class="product-label"><input type="checkbox" name="bathroomProducts" value="Shower Curtain">Shower Curtain<span class="prod-cat">Curtains</span></label>
+            <label class="product-label"><input type="checkbox" name="bathroomProducts" value="Soap Dispenser">Soap Dispenser<span class="prod-cat">Accessories</span></label>
+            <label class="product-label"><input type="checkbox" name="bathroomProducts" value="Dustbin / Waste Bin">Dustbin / Waste Bin<span class="prod-cat">Accessories</span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION VI: DINING -->
+    <div class="cond-section hidden" data-room-section="dining">
+      <div class="cond-section-label">Shown because Dining Area / Entire Home is selected</div>
+      <div class="section-header">
+        <div class="section-num cond">VI</div>
+        <div class="section-title-block cond"><div class="section-title cond">Dining &amp; Table Products</div><div class="section-subtitle">Tableware, linen &amp; accessories</div></div>
+      </div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">9</div><div class="q-info"><div class="q-title">Which Dining &amp; Table items do you require?</div></div></div>
+        <div class="q-body">
+          <div class="product-grid">
+            <label class="product-label"><input type="checkbox" name="diningProducts" value="Dining Table & Chairs">Dining Table &amp; Chairs<span class="prod-cat">Furniture</span></label>
+            <label class="product-label"><input type="checkbox" name="diningProducts" value="Table Cover / Tablecloth">Table Cover / Tablecloth<span class="prod-cat">Table Linen</span></label>
+            <label class="product-label"><input type="checkbox" name="diningProducts" value="Table Mats / Placemats">Table Mats / Placemats<span class="prod-cat">Table Linen</span></label>
+            <label class="product-label"><input type="checkbox" name="diningProducts" value="Crockery Set">Crockery Set<span class="prod-cat">Tableware</span></label>
+            <label class="product-label"><input type="checkbox" class="curtain-trigger" name="diningProducts" value="Curtain Fabric">Curtain Fabric<span class="prod-cat">Curtains</span></label>
+            <label class="product-label"><input type="checkbox" name="diningProducts" value="Blinds">Blinds<span class="prod-cat">Window</span></label>
+            <label class="product-label"><input type="checkbox" name="diningProducts" value="Carpet / Runner">Carpet / Runner<span class="prod-cat">Flooring</span></label>
+            <label class="product-label"><input type="checkbox" name="diningProducts" value="Dustbin / Waste Bin">Dustbin / Waste Bin<span class="prod-cat">Accessories</span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION VII -->
+    <div class="divider"><span>◆</span></div>
+    <div class="section-header">
+      <div class="section-num">VII</div>
+      <div class="section-title-block"><div class="section-title">Your Style Profile</div><div class="section-subtitle">Always shown — helps us curate precisely</div></div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">10</div><div class="q-info"><div class="q-title">Which design style speaks to you? (Select up to 3)</div><div class="q-tags"><span class="tag tag-req">Required</span></div></div></div>
+      <div class="q-body">
+        <ul class="opt-list" id="styleOptionsList">
+          <li><label class="opt-label"><input type="checkbox" class="style-check" name="designStyles" value="Modern">Modern — clean lines, understated, functional</label></li>
+          <li><label class="opt-label"><input type="checkbox" class="style-check" name="designStyles" value="Contemporary">Contemporary — current trends, mixed textures</label></li>
+          <li><label class="opt-label"><input type="checkbox" class="style-check" name="designStyles" value="Minimal">Minimal — quiet beauty, nothing unnecessary</label></li>
+          <li><label class="opt-label"><input type="checkbox" class="style-check accent-trigger" name="designStyles" value="French Classic">French Classic — romantic, carved details, soft tones</label></li>
+          <li><label class="opt-label"><input type="checkbox" class="style-check accent-trigger" name="designStyles" value="Royal Luxury">Royal Luxury — opulent, rich, dramatic</label></li>
+          <li><label class="opt-label"><input type="checkbox" class="style-check accent-trigger" name="designStyles" value="Art Deco">Art Deco — geometric glamour, bold symmetry</label></li>
+          <li><label class="opt-label"><input type="checkbox" class="style-check" name="designStyles" value="Transitional">Transitional — classic meets contemporary</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">11</div><div class="q-info"><div class="q-title">Which colour palette feels most like home to you?</div><div class="q-tags"><span class="tag tag-req">Required</span></div></div></div>
+      <div class="q-body">
+        <ul class="opt-list">
+          <li><label class="opt-label"><input type="radio" name="colorPalette" value="Neutral Serenity" required>Neutral Serenity — Ivory, Linen, Taupe, Chalk White</label></li>
+          <li><label class="opt-label"><input type="radio" name="colorPalette" value="Warm Luxury">Warm Luxury — Camel, Antique Gold, Cognac Brown</label></li>
+          <li><label class="opt-label"><input type="radio" name="colorPalette" value="Cool Elegance">Cool Elegance — Dove Grey, Steel Blue, Silver</label></li>
+          <li><label class="opt-label"><input type="radio" name="colorPalette" value="Bold Statement">Bold Statement — Deep Wine, Forest Emerald, Midnight Navy</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">12</div><div class="q-info"><div class="q-title">How decorative do you want your space?</div><div class="q-tags"><span class="tag tag-req">Required</span></div></div></div>
+      <div class="q-body">
+        <ul class="opt-list">
+          <li><label class="opt-label"><input type="radio" name="decorativeLevel" value="Very calm" required>Very calm — let the materials speak quietly</label></li>
+          <li><label class="opt-label"><input type="radio" name="decorativeLevel" value="Subtly decorative">Subtly decorative — tasteful, considered details</label></li>
+          <li><label class="opt-label"><input type="radio" name="decorativeLevel" value="Stylish & noticeable">Stylish &amp; noticeable — makes a confident statement</label></li>
+          <li><label class="opt-label"><input type="radio" name="decorativeLevel" value="Maximally rich">Maximally rich — every detail elevated</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- SECTION VIII: CURTAIN -->
+    <div class="cond-section hidden" id="curtainSection">
+      <div class="cond-section-label">Shown because a curtain product was selected</div>
+      <div class="section-header">
+        <div class="section-num cond">VIII</div>
+        <div class="section-title-block cond"><div class="section-title cond">Curtain &amp; Window Preferences</div></div>
+      </div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">13</div><div class="q-info"><div class="q-title">What curtain style do you envision?</div></div></div>
+        <div class="q-body">
+          <ul class="opt-list">
+            <li><label class="opt-label"><input type="radio" id="curtainStyleDrapes" name="curtainStyle" value="Floor-to-ceiling luxury drapes">Floor-to-ceiling luxury drapes — full drama</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainStyle" value="Sheer + curtain layering">Sheer + curtain layering — soft, dimensional</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainStyle" value="Minimal panel curtains">Minimal panel curtains — clean and architectural</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainStyle" value="Roman blinds">Roman blinds — structured, tailored</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainStyle" value="Motorized / smart home curtains">Motorized / smart home curtains</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainStyle" value="Not sure">Not sure — happy to be guided by your associate</label></li>
+          </ul>
+        </div>
+      </div>
+      <div class="q-card conditional hidden" id="curtainHeadingCard">
+        <div class="q-head"><div class="q-num cond">14</div><div class="q-info"><div class="q-title">Which heading / pleat style do you prefer?</div></div></div>
+        <div class="q-body">
+          <ul class="opt-list">
+            <li><label class="opt-label"><input type="radio" name="curtainHeading" value="Pinch Pleat">Pinch Pleat — traditional, formal, structured</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainHeading" value="Wave / S-fold">Wave / S-fold — modern, clean ripple</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainHeading" value="Goblet Pleat">Goblet Pleat — ultra formal, hotel grandeur</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainHeading" value="Eyelet">Eyelet — contemporary, casual</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainHeading" value="Recommend for me">Recommend for me</label></li>
+          </ul>
+        </div>
+      </div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">15</div><div class="q-info"><div class="q-title">Which fabric do you prefer for your curtains?</div></div></div>
+        <div class="q-body">
+          <ul class="opt-list">
+            <li><label class="opt-label"><input type="radio" name="curtainFabric" value="Linen">Linen — natural, breathable, casual luxury</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainFabric" value="Velvet">Velvet — rich, deep, opulent</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainFabric" value="Silk Blend">Silk Blend — luminous, refined, flowing</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainFabric" value="Cotton Blend">Cotton Blend — clean, crisp, easy care</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainFabric" value="Textured / Jacquard">Textured / Jacquard — woven interest</label></li>
+            <li><label class="opt-label"><input type="radio" name="curtainFabric" value="Show me options">Show me options — I'll decide in store</label></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION IX: LINEN -->
+    <div class="cond-section hidden" id="linenSection">
+      <div class="cond-section-label">Shown because a bedroom linen item was selected</div>
+      <div class="section-header">
+        <div class="section-num cond">IX</div>
+        <div class="section-title-block cond"><div class="section-title cond">Linen &amp; Bedding Preferences</div></div>
+      </div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">16</div><div class="q-info"><div class="q-title">How do you like your bed linen to feel?</div></div></div>
+        <div class="q-body">
+          <ul class="opt-list">
+            <li><label class="opt-label"><input type="radio" name="linenFeel" value="Crisp & cool">Crisp &amp; cool — hotel-white, high thread count</label></li>
+            <li><label class="opt-label"><input type="radio" name="linenFeel" value="Soft & cosy">Soft &amp; cosy — warm, brushed cotton or flannel</label></li>
+            <li><label class="opt-label"><input type="radio" name="linenFeel" value="Silky & smooth">Silky &amp; smooth — sateen or bamboo blend</label></li>
+            <li><label class="opt-label"><input type="radio" name="linenFeel" value="Natural & relaxed">Natural &amp; relaxed — washed linen, organic feel</label></li>
+          </ul>
+        </div>
+      </div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">16b</div><div class="q-info"><div class="q-title">Do you prefer plain linen or with design?</div></div></div>
+        <div class="q-body">
+          <ul class="opt-list">
+            <li><label class="opt-label"><input type="radio" name="linenPattern" value="Plain / solid colour">Plain / solid colour — clean, classic</label></li>
+            <li><label class="opt-label"><input type="radio" name="linenPattern" value="Subtle embroidery or border">Subtle embroidery or border detail</label></li>
+            <li><label class="opt-label"><input type="radio" name="linenPattern" value="Printed pattern">Printed pattern — geometric or floral</label></li>
+            <li><label class="opt-label"><input type="radio" name="linenPattern" value="Show me the range">Show me the range — I'll choose in store</label></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION X: ACCENT -->
+    <div class="cond-section hidden" id="accentSection">
+      <div class="cond-section-label">Shown because your style includes French Classic, Royal Luxury, or Art Deco</div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">17</div><div class="q-info"><div class="q-title">Which accent details elevate a space for you?</div></div></div>
+        <div class="q-body">
+          <ul class="opt-list">
+            <li><label class="opt-label"><input type="checkbox" name="accentDetails" value="Tassels & fringe trims">Tassels &amp; fringe trims</label></li>
+            <li><label class="opt-label"><input type="checkbox" name="accentDetails" value="Decorative contrast borders">Decorative contrast borders</label></li>
+            <li><label class="opt-label"><input type="checkbox" name="accentDetails" value="Hand embroidery">Hand embroidery on curtains or cushions</label></li>
+            <li><label class="opt-label"><input type="checkbox" name="accentDetails" value="Contrast piping">Contrast piping on upholstery / cushions</label></li>
+            <li><label class="opt-label"><input type="checkbox" name="accentDetails" value="Gold / metallic trims">Gold / metallic trims</label></li>
+            <li><label class="opt-label"><input type="checkbox" name="accentDetails" value="None">None — prefer a clean, unadorned finish</label></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION XI -->
+    <div class="divider"><span>◆</span></div>
+    <div class="section-header">
+      <div class="section-num">XI</div>
+      <div class="section-title-block"><div class="section-title">Lifestyle &amp; Final Preferences</div><div class="section-subtitle">Always shown</div></div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">18</div><div class="q-info"><div class="q-title">What matters most to you in your furnishings?</div><div class="q-tags"><span class="tag tag-req">Required</span></div></div></div>
+      <div class="q-body">
+        <ul class="opt-list">
+          <li><label class="opt-label"><input type="checkbox" name="priorities" value="Aesthetic beauty">Aesthetic beauty — it must look exceptional</label></li>
+          <li><label class="opt-label"><input type="checkbox" name="priorities" value="Comfort">Comfort — it must feel wonderful to live in</label></li>
+          <li><label class="opt-label"><input type="checkbox" name="priorities" value="Durability">Durability — investment pieces that last</label></li>
+          <li><label class="opt-label"><input type="checkbox" name="priorities" value="Easy maintenance">Easy maintenance — practical for daily life</label></li>
+          <li><label class="opt-label"><input type="checkbox" name="priorities" value="Luxury feel">Luxury feel — premium materials, no compromise</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">19</div><div class="q-info"><div class="q-title">What is your budget expectation for this project?</div><div class="q-tags"><span class="tag tag-req">Required</span></div></div></div>
+      <div class="q-body">
+        <ul class="opt-list">
+          <li><label class="opt-label"><input type="radio" name="budget" value="Balanced" required>Balanced — quality conscious, value is important</label></li>
+          <li><label class="opt-label"><input type="radio" name="budget" value="Mid Luxury">Mid Luxury — premium quality, thoughtful investment</label></li>
+          <li><label class="opt-label"><input type="radio" name="budget" value="Full Luxury">Full Luxury — finest materials, no compromise</label></li>
+          <li><label class="opt-label"><input type="radio" name="budget" value="Varies by category">Varies by category — I'll discuss with your team</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">20</div><div class="q-info"><div class="q-title">Where do you draw inspiration from?</div><div class="q-tags"><span class="tag tag-opt">Optional</span></div></div></div>
+      <div class="q-body">
+        <ul class="opt-list">
+          <li><label class="opt-label"><input type="checkbox" name="inspiration" value="5-star hotels">5-star hotels I have stayed in</label></li>
+          <li><label class="opt-label"><input type="checkbox" name="inspiration" value="Luxury homes">Luxury homes I have visited</label></li>
+          <li><label class="opt-label"><input type="checkbox" name="inspiration" value="Pinterest / Instagram / Houzz">Pinterest / Instagram / Houzz</label></li>
+          <li><label class="opt-label"><input type="checkbox" name="inspiration" value="Interior design magazines">Interior design magazines</label></li>
+          <li><label class="opt-label"><input type="checkbox" name="inspiration" value="MO Designs showroom">MO Designs showroom &amp; collections</label></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">21</div><div class="q-info"><div class="q-title">Is there anything you absolutely do NOT want?</div><div class="q-tags"><span class="tag tag-opt">Optional</span></div></div></div>
+      <div class="q-body"><textarea class="text-field" name="dislikes" placeholder='e.g. "No florals" · "Avoid orange tones" · "Nothing too dark"…'></textarea></div>
+    </div>
+
+    <div class="q-card">
+      <div class="q-head"><div class="q-num">22</div><div class="q-info"><div class="q-title">If your home could be described in three words, what would they be?</div><div class="q-tags"><span class="tag tag-opt">Optional</span></div></div></div>
+      <div class="q-body"><input class="text-field" type="text" name="threeWords" placeholder='e.g. "Serene, Refined, Timeless"'></div>
+    </div>
+
+    <div class="submit-row">
+      <button type="submit" class="submit-button" id="submitButton">Submit my style profile</button>
+      <div class="submit-error hidden" id="submitError"></div>
+    </div>
+
+  </form>
+</div>
+
+<div class="thankyou-screen" id="thankYouScreen">
+  <h2>Thank You</h2>
+  <p>Your style profile has been saved. Your MO Designs associate will now guide you through our curated collections. We look forward to helping bring your vision to life.</p>
+</div>
+
+<script>
+  var roomSectionTriggers = { living: 'living', bedroom: 'bedroom', bathroom: 'bathroom', dining: 'dining' };
+
+  function updateRoomSections() {
+    var activeRoomWords = [];
+    document.querySelectorAll('.room-check:checked').forEach(function (input) {
+      activeRoomWords = activeRoomWords.concat(input.getAttribute('data-room').split(' '));
+    });
+    Object.keys(roomSectionTriggers).forEach(function (roomKey) {
+      var section = document.querySelector('[data-room-section="' + roomKey + '"]');
+      if (!section) return;
+      section.classList.toggle('hidden', activeRoomWords.indexOf(roomKey) === -1);
+    });
+  }
+
+  function updateCurtainSection() {
+    var anyCurtain = document.querySelectorAll('.curtain-trigger:checked').length > 0;
+    document.getElementById('curtainSection').classList.toggle('hidden', !anyCurtain);
+  }
+
+  function updateLinenSection() {
+    var anyLinen = document.querySelectorAll('.linen-trigger:checked').length > 0;
+    document.getElementById('linenSection').classList.toggle('hidden', !anyLinen);
+  }
+
+  function updateAccentSection() {
+    var anyAccentStyle = document.querySelectorAll('.accent-trigger:checked').length > 0;
+    document.getElementById('accentSection').classList.toggle('hidden', !anyAccentStyle);
+  }
+
+  function updateCurtainHeading() {
+    var drapesSelected = document.getElementById('curtainStyleDrapes').checked;
+    document.getElementById('curtainHeadingCard').classList.toggle('hidden', !drapesSelected);
+  }
+
+  // Cap Q10 (design style) at 3 selections.
+  function enforceStyleCap() {
+    var checked = document.querySelectorAll('.style-check:checked');
+    var atCap = checked.length >= 3;
+    document.querySelectorAll('.style-check').forEach(function (input) {
+      if (!input.checked) input.disabled = atCap;
+    });
+  }
+
+  document.querySelectorAll('.room-check').forEach(function (el) { el.addEventListener('change', updateRoomSections); });
+  document.querySelectorAll('.curtain-trigger').forEach(function (el) { el.addEventListener('change', updateCurtainSection); });
+  document.querySelectorAll('.linen-trigger').forEach(function (el) { el.addEventListener('change', updateLinenSection); });
+  document.querySelectorAll('.style-check').forEach(function (el) {
+    el.addEventListener('change', function () { updateAccentSection(); enforceStyleCap(); });
+  });
+  document.getElementById('curtainStyleDrapes').addEventListener('change', updateCurtainHeading);
+  document.querySelectorAll('input[name="curtainStyle"]').forEach(function (el) { el.addEventListener('change', updateCurtainHeading); });
+
+  function getQueryParam(name) {
+    return new URLSearchParams(window.location.search).get(name) || '';
+  }
+
+  var prefillName = getQueryParam('customerName');
+  if (prefillName) {
+    document.getElementById('fullNameInput').value = prefillName;
+  }
+
+  function collectFormData() {
+    var form = document.getElementById('clientForm');
+    var data = {
+      fullName: form.fullName.value.trim(),
+      phone: form.phone.value.trim(),
+      location: form.location.value.trim(),
+      homeStage: (form.querySelector('input[name="homeStage"]:checked') || {}).value || '',
+      rooms: Array.from(form.querySelectorAll('input[name="rooms"]:checked')).map(function (i) { return i.value; }),
+      livingRoomProducts: Array.from(form.querySelectorAll('input[name="livingRoomProducts"]:checked')).map(function (i) { return i.value; }),
+      bedroomProducts: Array.from(form.querySelectorAll('input[name="bedroomProducts"]:checked')).map(function (i) { return i.value; }),
+      bathroomProducts: Array.from(form.querySelectorAll('input[name="bathroomProducts"]:checked')).map(function (i) { return i.value; }),
+      diningProducts: Array.from(form.querySelectorAll('input[name="diningProducts"]:checked')).map(function (i) { return i.value; }),
+      designStyles: Array.from(form.querySelectorAll('input[name="designStyles"]:checked')).map(function (i) { return i.value; }),
+      colorPalette: (form.querySelector('input[name="colorPalette"]:checked') || {}).value || '',
+      decorativeLevel: (form.querySelector('input[name="decorativeLevel"]:checked') || {}).value || '',
+      curtainStyle: (form.querySelector('input[name="curtainStyle"]:checked') || {}).value || '',
+      curtainHeading: (form.querySelector('input[name="curtainHeading"]:checked') || {}).value || '',
+      curtainFabric: (form.querySelector('input[name="curtainFabric"]:checked') || {}).value || '',
+      linenFeel: (form.querySelector('input[name="linenFeel"]:checked') || {}).value || '',
+      linenPattern: (form.querySelector('input[name="linenPattern"]:checked') || {}).value || '',
+      accentDetails: Array.from(form.querySelectorAll('input[name="accentDetails"]:checked')).map(function (i) { return i.value; }),
+      priorities: Array.from(form.querySelectorAll('input[name="priorities"]:checked')).map(function (i) { return i.value; }),
+      budget: (form.querySelector('input[name="budget"]:checked') || {}).value || '',
+      inspiration: Array.from(form.querySelectorAll('input[name="inspiration"]:checked')).map(function (i) { return i.value; }),
+      dislikes: form.dislikes.value.trim(),
+      threeWords: form.threeWords.value.trim(),
+      walkinId: getQueryParam('walkinId'),
+      customerName: getQueryParam('customerName'),
+      submittedByName: getQueryParam('submittedByName'),
+      submittedByEmail: getQueryParam('submittedByEmail'),
+    };
+    return data;
+  }
+
+  document.getElementById('clientForm').addEventListener('submit', function (event) {
+    event.preventDefault();
+    var submitButton = document.getElementById('submitButton');
+    var errorBox = document.getElementById('submitError');
+    errorBox.classList.add('hidden');
+    submitButton.disabled = true;
+    submitButton.textContent = 'Submitting…';
+
+    fetch('/api/client-form-submissions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(collectFormData()),
+    })
+      .then(function (response) { return response.json().then(function (body) { return { ok: response.ok, body: body }; }); })
+      .then(function (result) {
+        if (!result.ok || !result.body.ok) {
+          throw new Error((result.body && result.body.error) || 'Could not save your answers. Please try again.');
+        }
+        document.getElementById('formRoot').classList.add('hidden');
+        document.getElementById('thankYouScreen').classList.add('active');
+      })
+      .catch(function (error) {
+        errorBox.textContent = error.message;
+        errorBox.classList.remove('hidden');
+        submitButton.disabled = false;
+        submitButton.textContent = 'Submit my style profile';
+      });
+  });
+</script>
+</body>
+</html>

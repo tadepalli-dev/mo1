@@ -78,7 +78,7 @@ function bindEvents() {
   elements.approvalsCompletedBoard.addEventListener("click", handleApprovalsAction);
   elements.approvalsNotCompletedBoard.addEventListener("click", handleApprovalsAction);
   elements.kamalApprovalBoard.addEventListener("click", handleKamalApprovalAction);
-  elements.dilipApprovalBoard.addEventListener("click", handleDilipApprovalAction);
+  elements.fuelApprovalBoard.addEventListener("click", handleFuelRequestApprovalAction);
   elements.arunApprovalBoard.addEventListener("click", handleArunApprovalAction);
   elements.approvalsTabNav.addEventListener("click", handleApprovalsTabClick);
   elements.liveShareBanner.addEventListener("click", handleLiveShareBannerClick);

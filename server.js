@@ -10,6 +10,30 @@ const { buildSubmissionAuditRows } = require("./lib/submission-audit");
 
 const DEFAULT_PORT = Number(process.env.PORT) || 3000;
 const ROOT = __dirname;
+const SERVICE_ACCOUNT_PATH = path.join(ROOT, "service-account-key.json");
+const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
+let clientFormFirestore = null;
+
+// Lazy so a missing service-account-key.json doesn't crash every other
+// route on startup — only client-form-submissions actually needs Firestore.
+function getClientFormFirestore() {
+  if (clientFormFirestore) {
+    return clientFormFirestore;
+  }
+  if (!fs.existsSync(SERVICE_ACCOUNT_PATH)) {
+    return null;
+  }
+  const admin = require("firebase-admin");
+  const { getFirestore } = require("firebase-admin/firestore");
+  // Not admin.apps.length — this firebase-admin version doesn't expose
+  // .apps as a property (only the getApps() function), so that check
+  // throws instead of ever returning false.
+  if (!admin.getApps().length) {
+    admin.initializeApp({ credential: admin.cert(require(SERVICE_ACCOUNT_PATH)) });
+  }
+  clientFormFirestore = getFirestore();
+  return clientFormFirestore;
+}
 
 const DATA_DIR = path.join(ROOT, "data");
 if (!fs.existsSync(DATA_DIR)) {
@@ -887,6 +911,60 @@ const server = http.createServer((request, response) => {
     const title = requestUrl.searchParams.get("title") || "";
     response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     response.end(JSON.stringify(getChecklistQuestionsForTitle(title)));
+    return;
+  }
+
+  if (request.url === "/api/client-form-submissions" && request.method === "POST") {
+    setCorsHeaders(response, request);
+    const firestoreDb = getClientFormFirestore();
+    if (!firestoreDb) {
+      response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: "Form storage is not configured on this server." }));
+      return;
+    }
+    parseJsonBody(request)
+      .then((payload) => {
+        const submission = { ...payload, submittedAt: new Date().toISOString() };
+        return firestoreDb.collection(CLIENT_FORM_SUBMISSIONS_COLLECTION).add(submission);
+      })
+      .then((docRef) => {
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: true, id: docRef.id }));
+      })
+      .catch((error) => {
+        response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: false, error: error.message || "Could not save the submission." }));
+      });
+    return;
+  }
+
+  if (request.url === "/api/client-form-submissions" && request.method === "GET") {
+    setCorsHeaders(response, request);
+    if (!getSessionEmail(getBearerToken(request))) {
+      response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: "Unauthorized. Please sign in again." }));
+      return;
+    }
+    const firestoreDb = getClientFormFirestore();
+    if (!firestoreDb) {
+      response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: "Form storage is not configured on this server." }));
+      return;
+    }
+    firestoreDb
+      .collection(CLIENT_FORM_SUBMISSIONS_COLLECTION)
+      .orderBy("submittedAt", "desc")
+      .limit(200)
+      .get()
+      .then((snapshot) => {
+        const submissions = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: true, submissions }));
+      })
+      .catch((error) => {
+        response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: false, error: error.message || "Could not load submissions." }));
+      });
     return;
   }
 
