@@ -703,7 +703,8 @@ function handleCashHandlingChecklistSubmit() {
   const template = buildCashHandlingChecklistTemplate(shift);
   const responses = collectChecklistResponses(template);
   const denominations = collectCashDenominationRows();
-  const coinsAmount = Number(elements.checklistFields.querySelector(".cash-coins-input")?.value) || 0;
+  const coins = collectCashCoinRows();
+  const coinsAmount = coins.reduce((sum, row) => sum + row.amount, 0);
   const totalAmount = denominations.reduce((sum, row) => sum + row.amount, 0) + coinsAmount;
   const submittedAt = new Date().toISOString();
 
@@ -718,6 +719,7 @@ function handleCashHandlingChecklistSubmit() {
       ...responses,
       shift,
       denominations,
+      coins,
       coins_amount: coinsAmount,
       total_cash_amount: totalAmount,
     },
@@ -1829,6 +1831,15 @@ function collectCashDenominationRows() {
     const denomination = Number(input.getAttribute("data-cash-denom"));
     const notes = Number(input.value) || 0;
     return { denomination, notes, amount: denomination * notes };
+  });
+}
+
+
+function collectCashCoinRows() {
+  return [...elements.checklistFields.querySelectorAll(".cash-coin-input")].map((input) => {
+    const denomination = Number(input.getAttribute("data-cash-coin-denom"));
+    const count = Number(input.value) || 0;
+    return { denomination, count, amount: denomination * count };
   });
 }
 

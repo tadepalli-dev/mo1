@@ -14,7 +14,8 @@
 //
 // B = Total No Meeting Unique = unique customers (by mobile number) handed
 // over (assignedAt) to each salesperson last week.
-// D = Actual = same thing, but for the current week (in progress).
+// D = Actual = same thing, but for TODAY only — resets to 0 every morning,
+// not a week-to-date running total (deliberately different from B).
 //
 // E = total order amount for the CONVERTED customers only (same set as H,
 // below) — not every order created that week. For each unique converted
@@ -127,6 +128,14 @@ function getCurrentWeekBounds() {
   const nextMonday = new Date(thisMonday);
   nextMonday.setDate(thisMonday.getDate() + 7);
   return { weekStart: thisMonday, weekEndExclusive: nextMonday };
+}
+
+function getTodayBounds() {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(todayStart.getDate() + 1);
+  return { dayStart: todayStart, dayEndExclusive: tomorrowStart };
 }
 
 function getLastWeekBounds() {
@@ -280,13 +289,14 @@ async function main() {
     recordConversion(name, row[2], matchedAmount);
   });
 
-  // B and D — unique customers per salesperson, last week and this week,
+  // B and D — unique customers per salesperson, last week and TODAY only
+  // (D resets to 0 every morning — it's a daily count, not week-to-date),
   // straight from the Walk-in Desk's live Firestore collection.
-  const currentWeek = getCurrentWeekBounds();
+  const today = getTodayBounds();
   const walkinSnapshot = await firestore
     .collection("Walkin_Customer")
     .where("assignedAt", ">=", weekStartISO)
-    .where("assignedAt", "<", currentWeek.weekEndExclusive.toISOString())
+    .where("assignedAt", "<", today.dayEndExclusive.toISOString())
     .get();
   const visitorEntries = [];
   walkinSnapshot.forEach((doc) => {
@@ -297,8 +307,8 @@ async function main() {
     if (ts && mobile && handoverTo) visitorEntries.push({ ts, mobile, handoverTo });
   });
   const visitorInLastWeek = visitorEntries.filter((e) => e.ts >= weekStart && e.ts < weekEndExclusive);
-  const visitorInThisWeek = visitorEntries.filter((e) => e.ts >= currentWeek.weekStart && e.ts < currentWeek.weekEndExclusive);
-  console.log(`Walk-ins handed over — last week: ${visitorInLastWeek.length}, this week so far: ${visitorInThisWeek.length}`);
+  const visitorToday = visitorEntries.filter((e) => e.ts >= today.dayStart && e.ts < today.dayEndExclusive);
+  console.log(`Walk-ins handed over — last week: ${visitorInLastWeek.length}, today so far: ${visitorToday.length}`);
 
   const orderAmountValues = [];
   const convertedValues = [];
@@ -325,7 +335,7 @@ async function main() {
     convertedValues.push([realCount + placeholderCount]);
 
     uniqueMeetingValues.push([countUniqueCustomers(visitorInLastWeek.filter((e) => e.handoverTo === name))]);
-    actualMeetingValues.push([countUniqueCustomers(visitorInThisWeek.filter((e) => e.handoverTo === name))]);
+    actualMeetingValues.push([countUniqueCustomers(visitorToday.filter((e) => e.handoverTo === name))]);
   });
 
   salesmenRows.forEach((row, index) => {

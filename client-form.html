@@ -186,25 +186,56 @@
     </div>
 
     <!-- SECTION II -->
-    <div class="divider"><span>◆</span></div>
-    <div class="section-header">
-      <div class="section-num">II</div>
-      <div class="section-title-block"><div class="section-title">What Are You Shopping For?</div><div class="section-subtitle">Select all that apply</div></div>
+    <div id="sectionII" class="hidden">
+      <div class="divider"><span>◆</span></div>
+      <div class="section-header">
+        <div class="section-num">II</div>
+        <div class="section-title-block"><div class="section-title">What Are You Shopping For?</div><div class="section-subtitle">Select all that apply</div></div>
+      </div>
+
+      <div class="q-card">
+        <div class="q-head"><div class="q-num">5</div><div class="q-info"><div class="q-title">Which rooms / areas are part of this project?</div><div class="q-tags"><span class="tag tag-req">Required</span></div></div></div>
+        <div class="q-body">
+          <ul class="opt-list">
+            <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="living" name="rooms" value="Living Room">Living Room</label></li>
+            <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="bedroom" name="rooms" value="Master Bedroom">Master Bedroom</label></li>
+            <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="bedroom" name="rooms" value="Guest Bedroom(s)">Guest Bedroom(s)</label></li>
+            <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="dining" name="rooms" value="Dining Area">Dining Area</label></li>
+            <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="bathroom" name="rooms" value="Bathroom(s)">Bathroom(s)</label></li>
+            <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="living bedroom dining bathroom" name="rooms" value="Entire Home / Villa">Entire Home / Villa</label></li>
+            <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="office" name="rooms" value="Office / Study">Office / Study</label></li>
+            <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="specific" name="rooms" value="Just browsing / specific item">Just browsing / specific item</label></li>
+          </ul>
+        </div>
+      </div>
     </div>
 
-    <div class="q-card">
-      <div class="q-head"><div class="q-num">5</div><div class="q-info"><div class="q-title">Which rooms / areas are part of this project?</div><div class="q-tags"><span class="tag tag-req">Required</span></div></div></div>
-      <div class="q-body">
-        <ul class="opt-list">
-          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="living" name="rooms" value="Living Room">Living Room</label></li>
-          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="bedroom" name="rooms" value="Master Bedroom">Master Bedroom</label></li>
-          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="bedroom" name="rooms" value="Guest Bedroom(s)">Guest Bedroom(s)</label></li>
-          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="dining" name="rooms" value="Dining Area">Dining Area</label></li>
-          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="bathroom" name="rooms" value="Bathroom(s)">Bathroom(s)</label></li>
-          <li><label class="opt-label"><input type="checkbox" class="room-check" data-room="living bedroom dining bathroom" name="rooms" value="Entire Home / Villa">Entire Home / Villa</label></li>
-          <li><label class="opt-label"><input type="checkbox" name="rooms" value="Office / Study">Office / Study</label></li>
-          <li><label class="opt-label"><input type="checkbox" name="rooms" value="Just browsing / specific item">Just browsing / specific item</label></li>
-        </ul>
+    <!-- Shown only when Q4 = "Looking for one or two specific items" — a
+         single focused question instead of the full room-by-room catalog. -->
+    <div id="specificItemsSection" class="cond-section hidden">
+      <div class="cond-section-label">Shown because you're looking for one or two specific items</div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">5b</div><div class="q-info"><div class="q-title">Which item(s) are you looking for?</div></div></div>
+        <div class="q-body">
+          <div class="product-grid">
+            <label class="product-label"><input type="checkbox" class="curtain-trigger" name="specificItems" value="Curtains / Drapes">Curtains / Drapes<span class="prod-cat">Curtains</span></label>
+            <label class="product-label"><input type="checkbox" name="specificItems" value="Blinds">Blinds<span class="prod-cat">Window</span></label>
+            <label class="product-label"><input type="checkbox" name="specificItems" value="Sofa / Seating">Sofa / Seating<span class="prod-cat">Furniture</span></label>
+            <label class="product-label"><input type="checkbox" name="specificItems" value="Sofa Fabric (re-upholstery)">Sofa Fabric (re-upholstery)<span class="prod-cat">Fabric</span></label>
+            <label class="product-label"><input type="checkbox" name="specificItems" value="Cushion Covers">Cushion Covers<span class="prod-cat">Soft Furnish</span></label>
+            <label class="product-label"><input type="checkbox" name="specificItems" value="Carpet / Area Rug">Carpet / Area Rug<span class="prod-cat">Flooring</span></label>
+            <label class="product-label"><input type="checkbox" name="specificItems" value="Bedsheets / Bed Linen">Bedsheets / Bed Linen<span class="prod-cat">Linen</span></label>
+            <label class="product-label"><input type="checkbox" name="specificItems" value="Mattress / Mattress Protector">Mattress / Mattress Protector<span class="prod-cat">Foam</span></label>
+            <label class="product-label"><input type="checkbox" name="specificItems" value="Dining Table & Chairs">Dining Table &amp; Chairs<span class="prod-cat">Furniture</span></label>
+            <label class="product-label"><input type="checkbox" name="specificItems" value="Table Linen">Table Linen<span class="prod-cat">Table Linen</span></label>
+            <label class="product-label"><input type="checkbox" name="specificItems" value="Wallpaper / Wall Treatment">Wallpaper / Wall Treatment<span class="prod-cat">Walls</span></label>
+            <label class="product-label"><input type="checkbox" name="specificItems" value="Something else">Something else<span class="prod-cat">Other</span></label>
+          </div>
+        </div>
+      </div>
+      <div class="q-card">
+        <div class="q-head"><div class="q-num">5c</div><div class="q-info"><div class="q-title">Anything else / additional details</div><div class="q-tags"><span class="tag tag-opt">Optional</span></div></div></div>
+        <div class="q-body"><input class="text-field" type="text" name="specificItemDetails" placeholder="e.g. Curtains for one bedroom window · A single carpet · Cushion covers for the sofa…"></div>
       </div>
     </div>
 
@@ -314,10 +345,43 @@
       </div>
     </div>
 
-    <!-- SECTION VII -->
+    <!-- SECTION VII: OFFICE / STUDY -->
+    <div class="cond-section hidden" data-room-section="office">
+      <div class="cond-section-label">Shown because Office / Study is selected</div>
+      <div class="section-header">
+        <div class="section-num cond">VII</div>
+        <div class="section-title-block cond"><div class="section-title cond">Office &amp; Study Products</div><div class="section-subtitle">Furniture, storage &amp; window treatments</div></div>
+      </div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">9b</div><div class="q-info"><div class="q-title">Which Office / Study items do you require?</div></div></div>
+        <div class="q-body">
+          <div class="product-grid">
+            <label class="product-label"><input type="checkbox" name="officeProducts" value="Study Table / Desk">Study Table / Desk<span class="prod-cat">Furniture</span></label>
+            <label class="product-label"><input type="checkbox" name="officeProducts" value="Office Chair">Office Chair<span class="prod-cat">Furniture</span></label>
+            <label class="product-label"><input type="checkbox" name="officeProducts" value="Bookshelf / Storage Unit">Bookshelf / Storage Unit<span class="prod-cat">Furniture</span></label>
+            <label class="product-label"><input type="checkbox" class="curtain-trigger" name="officeProducts" value="Curtain Fabric">Curtain Fabric<span class="prod-cat">Curtains</span></label>
+            <label class="product-label"><input type="checkbox" name="officeProducts" value="Blinds">Blinds<span class="prod-cat">Window</span></label>
+            <label class="product-label"><input type="checkbox" name="officeProducts" value="Carpet / Rug">Carpet / Rug<span class="prod-cat">Flooring</span></label>
+            <label class="product-label"><input type="checkbox" name="officeProducts" value="Cushion Covers">Cushion Covers<span class="prod-cat">Soft Furnish</span></label>
+            <label class="product-label"><input type="checkbox" name="officeProducts" value="Desk Lamp">Desk Lamp<span class="prod-cat">Accessories</span></label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Just browsing / specific item — no product grid, just a direct question. -->
+    <div class="cond-section hidden" data-room-section="specific">
+      <div class="cond-section-label">Shown because "Just browsing / specific item" is selected</div>
+      <div class="q-card conditional">
+        <div class="q-head"><div class="q-num cond">9c</div><div class="q-info"><div class="q-title">What specific item(s) are you looking for?</div></div></div>
+        <div class="q-body"><input class="text-field" type="text" name="specificItem" placeholder="e.g. Curtains for one bedroom window · A single carpet · Cushion covers for the sofa…"></div>
+      </div>
+    </div>
+
+    <!-- SECTION VIII -->
     <div class="divider"><span>◆</span></div>
     <div class="section-header">
-      <div class="section-num">VII</div>
+      <div class="section-num">VIII</div>
       <div class="section-title-block"><div class="section-title">Your Style Profile</div><div class="section-subtitle">Always shown — helps us curate precisely</div></div>
     </div>
 
@@ -364,7 +428,7 @@
     <div class="cond-section hidden" id="curtainSection">
       <div class="cond-section-label">Shown because a curtain product was selected</div>
       <div class="section-header">
-        <div class="section-num cond">VIII</div>
+        <div class="section-num cond">IX</div>
         <div class="section-title-block cond"><div class="section-title cond">Curtain &amp; Window Preferences</div></div>
       </div>
       <div class="q-card conditional">
@@ -411,7 +475,7 @@
     <div class="cond-section hidden" id="linenSection">
       <div class="cond-section-label">Shown because a bedroom linen item was selected</div>
       <div class="section-header">
-        <div class="section-num cond">IX</div>
+        <div class="section-num cond">X</div>
         <div class="section-title-block cond"><div class="section-title cond">Linen &amp; Bedding Preferences</div></div>
       </div>
       <div class="q-card conditional">
@@ -525,7 +589,24 @@
 </div>
 
 <script>
-  var roomSectionTriggers = { living: 'living', bedroom: 'bedroom', bathroom: 'bathroom', dining: 'dining' };
+  var roomSectionTriggers = { living: 'living', bedroom: 'bedroom', bathroom: 'bathroom', dining: 'dining', office: 'office', specific: 'specific' };
+
+  // Q4's last option ("Looking for one or two specific items") skips the
+  // room picker AND the full room-by-room catalog — it shows one focused
+  // "which item(s)" question instead (#specificItemsSection). The other
+  // three options keep the normal room-picker-first flow.
+  function isSpecificItemsAnswer() {
+    var selected = document.querySelector('input[name="homeStage"]:checked');
+    return !!selected && selected.value === 'One or two specific items';
+  }
+
+  function updateSectionII() {
+    var selected = document.querySelector('input[name="homeStage"]:checked');
+    var specificItems = isSpecificItemsAnswer();
+    document.getElementById('sectionII').classList.toggle('hidden', !selected || specificItems);
+    document.getElementById('specificItemsSection').classList.toggle('hidden', !specificItems);
+    updateRoomSections();
+  }
 
   function updateRoomSections() {
     var activeRoomWords = [];
@@ -568,6 +649,20 @@
     });
   }
 
+  // Native radios can't be unclicked once selected — clicking the already-
+  // selected Q4 option deselects it instead, hiding Section II again.
+  document.querySelectorAll('input[name="homeStage"]').forEach(function (el) {
+    el.addEventListener('mousedown', function () {
+      el.dataset.wasChecked = el.checked ? 'true' : 'false';
+    });
+    el.addEventListener('click', function () {
+      if (el.dataset.wasChecked === 'true') {
+        el.checked = false;
+        updateSectionII();
+      }
+    });
+    el.addEventListener('change', updateSectionII);
+  });
   document.querySelectorAll('.room-check').forEach(function (el) { el.addEventListener('change', updateRoomSections); });
   document.querySelectorAll('.curtain-trigger').forEach(function (el) { el.addEventListener('change', updateCurtainSection); });
   document.querySelectorAll('.linen-trigger').forEach(function (el) { el.addEventListener('change', updateLinenSection); });
@@ -598,6 +693,10 @@
       bedroomProducts: Array.from(form.querySelectorAll('input[name="bedroomProducts"]:checked')).map(function (i) { return i.value; }),
       bathroomProducts: Array.from(form.querySelectorAll('input[name="bathroomProducts"]:checked')).map(function (i) { return i.value; }),
       diningProducts: Array.from(form.querySelectorAll('input[name="diningProducts"]:checked')).map(function (i) { return i.value; }),
+      officeProducts: Array.from(form.querySelectorAll('input[name="officeProducts"]:checked')).map(function (i) { return i.value; }),
+      specificItem: form.specificItem.value.trim(),
+      specificItems: Array.from(form.querySelectorAll('input[name="specificItems"]:checked')).map(function (i) { return i.value; }),
+      specificItemDetails: form.specificItemDetails.value.trim(),
       designStyles: Array.from(form.querySelectorAll('input[name="designStyles"]:checked')).map(function (i) { return i.value; }),
       colorPalette: (form.querySelector('input[name="colorPalette"]:checked') || {}).value || '',
       decorativeLevel: (form.querySelector('input[name="decorativeLevel"]:checked') || {}).value || '',

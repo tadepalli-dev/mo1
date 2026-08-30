@@ -109,7 +109,8 @@ const INITIAL_USERS = [
 
 const GENERATOR_CHECKLIST_UNITS = Object.freeze(["DG-1-MO1", "DG-2-MO1", "DG-1-MO2", "DG-2-MO2"]);
 const CASH_HANDLING_SHIFTS = Object.freeze(["Morning", "Evening"]);
-const CASH_DENOMINATIONS = Object.freeze([2000, 500, 100, 50, 20, 10]);
+const CASH_DENOMINATIONS = Object.freeze([500, 200, 100, 50, 20, 10]);
+const CASH_COIN_DENOMINATIONS = Object.freeze([20, 10, 5, 2, 1]);
 const METER_READING_LOCATIONS = Object.freeze(["MO1", "MO2"]);
 const EARTHING_CLEANING_LOCATIONS = Object.freeze(["MO1", "MO2"]);
 
@@ -1126,13 +1127,6 @@ const CHECKLIST_TEMPLATES = {
         labelHindi: "क्या कैश लॉकर सुरक्षित रूप से बंद है?",
         type: "select",
         options: ["", "Yes", "No"],
-      },
-      {
-        id: "cash_locker_photo",
-        label: "Upload image of the cash locker.",
-        labelHindi: "कैश लॉकर की फोटो अपलोड करें।",
-        type: "photo",
-        hint: "Take a photo with your phone camera, or upload one from your gallery.",
       },
       {
         id: "cash_handling_notes",

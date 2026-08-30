@@ -200,10 +200,15 @@ function isTaskAssignedToUser(task, user) {
     return false;
   }
 
+  // Once a task has an assigneeEmail on file, it's decisive — two people can
+  // share a display name (e.g. two employees both named "Pradeep"), so only
+  // fall back to matching by name for older tasks that never had an email
+  // recorded at all. Falling through on a same-name-different-email task
+  // would attribute one person's tasks to the other.
   const taskEmail = String(task.assigneeEmail || "").trim().toLowerCase();
   const userEmail = String(user.email || "").trim().toLowerCase();
-  if (taskEmail && userEmail && taskEmail === userEmail) {
-    return true;
+  if (taskEmail && userEmail) {
+    return taskEmail === userEmail;
   }
 
   const taskName = normalizePersonName(task.assigneeName);

@@ -149,7 +149,10 @@ async function main() {
       newTasks.push({
         id: taskId,
         taskId,
-        title: `${standardTitle} for ${customerName}`,
+        // customerName already gets its own column/field wherever this is
+        // displayed (the app's walk-in board, the Tasks sheet export) — a
+        // "for {customer}" suffix on the title just repeats it.
+        title: standardTitle,
         checklistLabel: standardTitle,
         source: "walkin",
         walkinId,

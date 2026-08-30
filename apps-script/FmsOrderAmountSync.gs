@@ -25,7 +25,8 @@
 //
 // B = Total No Meeting Unique = unique customers (by mobile number) handed
 // over (assignedAt) to each salesperson last week.
-// D = Actual = same thing, but for the current week (in progress).
+// D = Actual = same thing, but for TODAY only — resets to 0 every morning,
+// not a week-to-date running total (deliberately different from B).
 //
 // E = total order amount for the CONVERTED customers only (same set as
 // Converted, below) — not every order created that week. For each unique
@@ -91,6 +92,14 @@ function getLastWeekBounds_() {
   const lastMonday = new Date(thisMonday);
   lastMonday.setDate(thisMonday.getDate() - 7);
   return { weekStart: lastMonday, weekEndExclusive: thisMonday };
+}
+
+function getTodayBounds_() {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(todayStart.getDate() + 1);
+  return { dayStart: todayStart, dayEndExclusive: tomorrowStart };
 }
 
 // "0" is used as a placeholder for "no mobile entered" across many
@@ -250,14 +259,15 @@ function runFmsSync_(dryRun) {
     });
   }
 
-  // B and D — unique customers per salesperson, last week and this week,
+  // B and D — unique customers per salesperson, last week and TODAY only
+  // (D resets to 0 every morning — it's a daily count, not week-to-date),
   // straight from the Walk-in Desk's live Firestore collection.
-  const currentWeek = getCurrentWeekBounds_();
+  const today = getTodayBounds_();
   const walkins = queryFirestoreCollection_(
     "Walkin_Customer",
     [
       { field: "assignedAt", op: "GREATER_THAN_OR_EQUAL", value: weekStartISO },
-      { field: "assignedAt", op: "LESS_THAN", value: currentWeek.weekEndExclusive.toISOString() },
+      { field: "assignedAt", op: "LESS_THAN", value: today.dayEndExclusive.toISOString() },
     ],
     5000
   );
@@ -270,8 +280,8 @@ function runFmsSync_(dryRun) {
     if (ts && mobile && handoverTo) visitorEntries.push({ ts: ts, mobile: mobile, handoverTo: handoverTo });
   });
   const visitorInLastWeek = visitorEntries.filter((e) => e.ts >= weekStart && e.ts < weekEndExclusive);
-  const visitorInThisWeek = visitorEntries.filter((e) => e.ts >= currentWeek.weekStart && e.ts < currentWeek.weekEndExclusive);
-  Logger.log("Walk-ins handed over — last week: " + visitorInLastWeek.length + ", this week so far: " + visitorInThisWeek.length);
+  const visitorToday = visitorEntries.filter((e) => e.ts >= today.dayStart && e.ts < today.dayEndExclusive);
+  Logger.log("Walk-ins handed over — last week: " + visitorInLastWeek.length + ", today so far: " + visitorToday.length);
 
   const orderAmountValues = [];
   const convertedValues = [];
@@ -297,7 +307,7 @@ function runFmsSync_(dryRun) {
     convertedValues.push([realPhoneKeys.length + placeholderList.length]);
 
     uniqueMeetingValues.push([countUniqueCustomers_(visitorInLastWeek.filter((e) => e.handoverTo === name))]);
-    actualMeetingValues.push([countUniqueCustomers_(visitorInThisWeek.filter((e) => e.handoverTo === name))]);
+    actualMeetingValues.push([countUniqueCustomers_(visitorToday.filter((e) => e.handoverTo === name))]);
   });
 
   salesmenRows.forEach((row, index) => {

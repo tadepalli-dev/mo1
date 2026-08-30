@@ -7,6 +7,7 @@ const { appendChecklistSubmission, syncUsersSheet } = require("./lib/checklist-s
 const { getServiceAccountEmail, lookupVehicleAssignment } = require("./lib/vehicle-sheet-directory");
 const { rewriteSubmissionReport } = require("./lib/submission-report-export");
 const { buildSubmissionAuditRows } = require("./lib/submission-audit");
+const { appendClientFormSubmissionRow } = require("./lib/client-form-sheet-export");
 
 const DEFAULT_PORT = Number(process.env.PORT) || 3000;
 const ROOT = __dirname;
@@ -71,6 +72,18 @@ const insertSessionStatement = db.prepare(
 );
 const getSessionStatement = db.prepare("SELECT * FROM sessions WHERE token = ?");
 const deleteSessionStatement = db.prepare("DELETE FROM sessions WHERE token = ?");
+
+// A user can have more than one real-world email (e.g. their MoTrack record
+// predates a rename, or they log in with whichever address they remember) —
+// aliasEmails lets any of those match at login/forgot-password without
+// duplicating the account. Everything downstream (tasks, sessions) still
+// keys off the single canonical user.email, so nothing else needs to change.
+function matchesUserEmail(user, email) {
+  if (String(user.email || "").toLowerCase() === email) {
+    return true;
+  }
+  return (user.aliasEmails || []).some((alias) => String(alias || "").toLowerCase() === email);
+}
 
 function createSession(email) {
   const token = crypto.randomBytes(32).toString("hex");
@@ -683,7 +696,7 @@ const server = http.createServer((request, response) => {
       const email = String(payload.email || "").trim().toLowerCase();
       const password = String(payload.password || "").trim();
       const users = readUsersWithPasswords();
-      const matchedUser = users.find((user) => String(user.email || "").toLowerCase() === email);
+      const matchedUser = users.find((user) => matchesUserEmail(user, email));
 
       if (!matchedUser) {
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -725,7 +738,7 @@ const server = http.createServer((request, response) => {
 
       const email = String(payload.email || "").trim().toLowerCase();
       const users = readUsersWithPasswords();
-      const matchedUser = users.find((user) => String(user.email || "").toLowerCase() === email);
+      const matchedUser = users.find((user) => matchesUserEmail(user, email));
 
       if (!matchedUser) {
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
@@ -922,14 +935,20 @@ const server = http.createServer((request, response) => {
       response.end(JSON.stringify({ ok: false, error: "Form storage is not configured on this server." }));
       return;
     }
+    let pendingSubmission = null;
     parseJsonBody(request)
       .then((payload) => {
-        const submission = { ...payload, submittedAt: new Date().toISOString() };
-        return firestoreDb.collection(CLIENT_FORM_SUBMISSIONS_COLLECTION).add(submission);
+        pendingSubmission = { ...payload, submittedAt: new Date().toISOString() };
+        return firestoreDb.collection(CLIENT_FORM_SUBMISSIONS_COLLECTION).add(pendingSubmission);
       })
       .then((docRef) => {
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({ ok: true, id: docRef.id }));
+        // Best-effort — Firestore is already the source of truth, so a
+        // sheet-export hiccup shouldn't affect the response already sent.
+        return appendClientFormSubmissionRow(ROOT, pendingSubmission).catch((error) => {
+          console.error("Could not export client form submission to Sheets:", error.message);
+        });
       })
       .catch((error) => {
         response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });

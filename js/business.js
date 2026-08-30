@@ -83,13 +83,6 @@ function buildCashHandlingChecklistTemplate(shift) {
           labelHindi: `क्या ${shiftHindi} कैश लॉकर सुरक्षित रूप से बंद है?`,
         };
       }
-      if (question.id === "cash_locker_photo") {
-        return {
-          ...question,
-          label: `Upload image of the ${shift} cash locker.`,
-          labelHindi: `${shiftHindi} कैश लॉकर की फोटो अपलोड करें।`,
-        };
-      }
       return question;
     }),
   ];

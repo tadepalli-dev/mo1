@@ -8,6 +8,7 @@ const { appendChecklistSubmission, syncUsersSheet } = require("../lib/checklist-
 const { rewriteSubmissionReport } = require("../lib/submission-report-export");
 const { buildSubmissionAuditRows } = require("../lib/submission-audit");
 const { getServiceAccountEmail, lookupVehicleAssignment } = require("../lib/vehicle-sheet-directory");
+const { appendClientFormSubmissionRow } = require("../lib/client-form-sheet-export");
 
 const ROOT = process.cwd();
 const BUNDLED_DATA_DIR = path.join(ROOT, "data");
@@ -178,7 +179,13 @@ function getFirestoreDb() {
 
   try {
     const serviceAccount = require(SERVICE_ACCOUNT_PATH);
-    if (!admin.apps.length) {
+    // Not admin.apps.length — this firebase-admin version doesn't expose
+    // .apps as a property (only the getApps() function), so that check
+    // throws instead of ever returning false, silently falling through to
+    // the catch below and permanently disabling Firestore for the rest of
+    // this process's life. That's why production has been serving a frozen
+    // snapshot from the last deploy instead of live data.
+    if (!admin.getApps().length) {
       admin.initializeApp({ credential: admin.cert(serviceAccount) });
     }
     firestore = getFirestore();
@@ -357,6 +364,18 @@ function getSessionSecret() {
   }
 
   return "motrack-vercel-session-secret";
+}
+
+// A user can have more than one real-world email (e.g. their MoTrack record
+// predates a rename, or they log in with whichever address they remember) —
+// aliasEmails lets any of those match at login/forgot-password without
+// duplicating the account. Everything downstream (tasks, sessions) still
+// keys off the single canonical user.email, so nothing else needs to change.
+function matchesUserEmail(user, email) {
+  if (String(user.email || "").toLowerCase() === email) {
+    return true;
+  }
+  return (user.aliasEmails || []).some((alias) => String(alias || "").toLowerCase() === email);
 }
 
 function createSessionToken(email) {
@@ -618,7 +637,7 @@ async function handleLogin(request, response) {
   const email = String(payload.email || "").trim().toLowerCase();
   const password = String(payload.password || "").trim();
   const users = await readUsersWithPasswordsAsync();
-  const matchedUser = users.find((user) => String(user.email || "").toLowerCase() === email);
+  const matchedUser = users.find((user) => matchesUserEmail(user, email));
 
   if (!matchedUser) {
     sendJson(response, 200, { ok: false, reason: "not_found" });
@@ -649,7 +668,7 @@ async function handleForgotPassword(request, response) {
 
   const email = String(payload.email || "").trim().toLowerCase();
   const users = await readUsersWithPasswordsAsync();
-  const matchedUser = users.find((user) => String(user.email || "").toLowerCase() === email);
+  const matchedUser = users.find((user) => matchesUserEmail(user, email));
 
   if (!matchedUser) {
     sendJson(response, 200, { ok: false, reason: "not_found" });
@@ -750,6 +769,16 @@ async function handleClientFormSubmissionCreate(request, response) {
     sendJson(response, 200, { ok: true, id: docRef.id });
   } catch (error) {
     sendJson(response, 500, { ok: false, error: error.message || "Could not save the submission." });
+    return;
+  }
+
+  // Best-effort — Firestore is already the source of truth for this
+  // submission, so a sheet-export hiccup shouldn't affect the response
+  // already sent to the customer's browser.
+  try {
+    await appendClientFormSubmissionRow(ROOT, submission);
+  } catch (error) {
+    console.error("Could not export client form submission to Sheets:", error.message);
   }
 }
 

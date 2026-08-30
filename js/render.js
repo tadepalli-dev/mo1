@@ -2101,20 +2101,24 @@ function createCashDenominationTable() {
     `;
   }).join("");
 
-  const coinsRowMarkup = `
-    <tr>
-      <td>Coins / Change</td>
-      <td colspan="2">
-        <input
-          type="number"
-          min="0"
-          step="1"
-          class="pantry-input cash-coins-input"
-          placeholder="Enter amount"
-        />
-      </td>
-    </tr>
-  `;
+  const coinRowsMarkup = CASH_COIN_DENOMINATIONS.map((denomination) => {
+    return `
+      <tr>
+        <td>₹${denomination} Coin</td>
+        <td>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            class="pantry-input cash-coin-input"
+            data-cash-coin-denom="${denomination}"
+            placeholder="Count"
+          />
+        </td>
+        <td class="cash-coin-amount" data-cash-coin-denom-amount="${denomination}">₹0</td>
+      </tr>
+    `;
+  }).join("");
 
   const tableWrap = document.createElement("div");
   tableWrap.className = "cash-table-wrap";
@@ -2129,7 +2133,7 @@ function createCashDenominationTable() {
       </thead>
       <tbody>
         ${noteRowsMarkup}
-        ${coinsRowMarkup}
+        ${coinRowsMarkup}
       </tbody>
       <tfoot>
         <tr>
@@ -2141,7 +2145,7 @@ function createCashDenominationTable() {
   `;
   wrapper.append(tableWrap);
 
-  tableWrap.querySelectorAll(".cash-denom-input, .cash-coins-input").forEach((input) => {
+  tableWrap.querySelectorAll(".cash-denom-input, .cash-coin-input").forEach((input) => {
     input.addEventListener("input", () => updateCashDenominationTotals(tableWrap));
   });
 
@@ -2162,8 +2166,16 @@ function updateCashDenominationTotals(tableWrap) {
     }
   });
 
-  const coinsInput = tableWrap.querySelector(".cash-coins-input");
-  total += Number(coinsInput?.value) || 0;
+  tableWrap.querySelectorAll(".cash-coin-input").forEach((input) => {
+    const denomination = Number(input.getAttribute("data-cash-coin-denom"));
+    const count = Number(input.value) || 0;
+    const amount = denomination * count;
+    total += amount;
+    const amountCell = tableWrap.querySelector(`[data-cash-coin-denom-amount="${denomination}"]`);
+    if (amountCell) {
+      amountCell.textContent = `₹${amount}`;
+    }
+  });
 
   const totalCell = tableWrap.querySelector(".cash-denom-total");
   if (totalCell) {

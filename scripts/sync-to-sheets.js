@@ -191,13 +191,27 @@ async function main() {
   // broadly (e.g. as a Looker Studio data source) than the app itself.
   const usersWithoutPasswords = store.users.map(({ password, ...rest }) => rest);
 
+  // Walk-in customer checklist clones (one set per customer handed to a
+  // salesman that day) dwarf the actual employee task list in row count and
+  // carry customer/walk-in fields that don't apply to a plain employee task
+  // — keep this tab to genuinely assigned employee tasks only.
+  const employeeTasks = store.tasks.filter((task) => task.source !== "walkin");
+
+  // state.pantryAlerts is unshift()'d in the app (newest submission first),
+  // which reads backwards for a report meant to be read top-to-bottom —
+  // oldest submission first, so e.g. all of Kamal's rows appear in the order
+  // he actually submitted them, earliest at the top.
+  const pantryAlertsChronological = [...store.pantryAlerts].sort(
+    (left, right) => new Date(left.submittedAt) - new Date(right.submittedAt)
+  );
+
   const tabs = {
-    Tasks: objectsToRows(store.tasks),
+    Tasks: objectsToRows(employeeTasks),
     Completions: objectsToRows(
       Object.entries(store.completions).map(([key, value]) => ({ completionKey: key, ...value }))
     ),
     Users: objectsToRows(usersWithoutPasswords),
-    "Pantry Alerts": objectsToRows(store.pantryAlerts),
+    "Pantry Alerts": objectsToRows(pantryAlertsChronological),
   };
 
   if (dryRun) {
