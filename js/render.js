@@ -28,16 +28,23 @@ function renderHomeDashboard() {
   }
 
   const isAdminUser = isAdmin(state.activeUser);
+  const isPcUser = canMonitorChecklists(state.activeUser) && !isAdminUser;
   elements.homeTitle.textContent = isAdminUser ? `Welcome back, ${state.activeUser.name}` : `${state.activeUser.name} Dashboard`;
   elements.homeSubtitle.textContent = getDashboardSubtitle(state.activeUser);
   elements.adminWelcome.textContent = `Welcome back, ${state.activeUser.name}`;
+  if (elements.pcDashboardWelcome) {
+    elements.pcDashboardWelcome.textContent = `Checklist monitoring for ${state.activeUser.name}`;
+  }
   elements.employeeWelcome.textContent = `Welcome back, ${state.activeUser.name}`;
   elements.adminDashboardPanel.classList.toggle("hidden", !isAdminUser);
-  elements.employeeDashboardPanel.classList.toggle("hidden", isAdminUser);
+  elements.pcDashboardPanel?.classList.toggle("hidden", !isPcUser);
+  elements.employeeDashboardPanel.classList.toggle("hidden", isAdminUser || isPcUser);
   elements.openAssignTaskButton.classList.toggle("hidden", !canAssignTasks(state.activeUser));
 
   if (isAdminUser) {
     renderAdminTaskBoard();
+  } else if (isPcUser) {
+    renderPcDashboardPanel();
   } else {
     renderEmployeeTaskBoard();
   }
@@ -73,6 +80,88 @@ function createBuddyCoverageBannerItem(entry) {
       <span>${message}</span>
     </div>
   `;
+}
+
+
+function buildChecklistMonitorSnapshot(selectedDate) {
+  const selectedDateObject = new Date(`${selectedDate}T00:00:00`);
+
+  const submittedEntries = Object.entries(state.completions)
+    .filter(([key, completion]) =>
+      isMonitorableCompletionRecord(key, completion)
+      && (completion.occurrenceDate || toDateValue(completion.submittedAt)) === selectedDate
+    )
+    .map(([key, completion]) => {
+      const baseTask = state.tasks.find(
+        (item) => String(item.taskId || item.id) === String(completion.taskId)
+      );
+      const task = baseTask
+        ? createTaskOccurrence(baseTask, selectedDateObject, {
+            occurrenceSlot: completion.occurrenceSlot,
+            occurrenceSlotLabel: completion.occurrenceSlotLabel,
+          })
+        : null;
+      return task ? { key, completion, task } : null;
+    })
+    .filter(Boolean)
+    .sort((left, right) => new Date(right.completion.submittedAt) - new Date(left.completion.submittedAt));
+
+  const submittedOccurrenceKeys = new Set(submittedEntries.map((entry) => getCompletionKey(entry.task)));
+  const notSubmitted = state.tasks
+    .filter((task) => task.active !== false && taskOccursOnDate(task, selectedDate))
+    .flatMap((task) => createTaskOccurrencesForDate(task, selectedDateObject))
+    .filter((task) => isTaskCompletionEnabled(task))
+    .filter((task) => !submittedOccurrenceKeys.has(getCompletionKey(task)))
+    .map((task) => ({ task }))
+    .sort((left, right) => (left.task.assigneeName || "").localeCompare(right.task.assigneeName || ""));
+
+  return {
+    submittedEntries,
+    notSubmitted,
+    completed: submittedEntries.filter(
+      (entry) => entry.completion.approvalStatus !== "approved" && entry.completion.status !== "not_completed"
+    ),
+    notCompleted: submittedEntries.filter(
+      (entry) => entry.completion.approvalStatus !== "approved" && entry.completion.status === "not_completed"
+    ),
+    approved: submittedEntries.filter((entry) => entry.completion.approvalStatus === "approved"),
+  };
+}
+
+
+function renderPcDashboardPanel() {
+  if (!elements.pcDashboardPanel) {
+    return;
+  }
+
+  const selectedDate = elements.pcMonitorDateInput?.value || state.pcMonitorDate || todayValue();
+  state.pcMonitorDate = selectedDate;
+  if (elements.pcMonitorDateInput && elements.pcMonitorDateInput.value !== selectedDate) {
+    elements.pcMonitorDateInput.value = selectedDate;
+  }
+
+  const submittedEntries = buildChecklistMonitorSnapshot(selectedDate).submittedEntries;
+  const employeeCount = getEmployeeCountForEntries(submittedEntries);
+  const formattedDate = formatDateValue(selectedDate);
+
+  elements.pcTodaySummary.textContent = submittedEntries.length
+    ? `Showing submitted checklists for ${formattedDate}. Click an employee name to open all tasks for that date.`
+    : `No checklist was submitted on ${formattedDate}.`;
+  elements.pcSubmittedMeta.textContent = submittedEntries.length
+    ? `${submittedEntries.length} submission${submittedEntries.length === 1 ? "" : "s"} from ${employeeCount} employee${employeeCount === 1 ? "" : "s"}`
+    : `0 submissions on ${formattedDate}`;
+  elements.pcSubmittedEmpty.textContent = `No checklist was submitted on ${formattedDate}.`;
+
+  renderGroupedApprovalRows(submittedEntries, {
+    board: elements.pcSubmittedBoard,
+    emptyState: elements.pcSubmittedEmpty,
+    pagination: elements.pcSubmittedPagination,
+    pageKey: "pcSubmittedPage",
+    headerRow: "<th>Customer</th><th>Walk-in ID</th><th>Task</th><th>Task details</th><th>Submitted</th><th>View</th>",
+    createRow: createPcSubmittedGroupRow,
+    countLabel: (count) => `submission${count === 1 ? "" : "s"}`,
+    rerender: renderPcDashboardPanel,
+  });
 }
 
 
@@ -412,7 +501,7 @@ function renderApprovalsPage() {
     return;
   }
 
-  const canView = canAssignTasks(state.activeUser);
+  const canView = canMonitorChecklists(state.activeUser);
   if (!canView) {
     elements.approvalsPendingBoard.innerHTML = "";
     elements.approvalsCompletedBoard.innerHTML = "";
@@ -425,12 +514,16 @@ function renderApprovalsPage() {
     return;
   }
 
-  elements.approvalsDateInput.value = elements.approvalsDateInput.value || todayValue();
+  const canReview = canAssignTasks(state.activeUser);
+  elements.approvalsDateInput.value = elements.approvalsDateInput.value || getDefaultApprovalsDateForUser(state.activeUser);
   const selectedDate = elements.approvalsDateInput.value;
   const selectedDateObject = new Date(`${selectedDate}T00:00:00`);
 
   const submittedEntries = Object.entries(state.completions)
-    .filter(([, completion]) => completion.occurrenceDate === selectedDate && !completion.visitNumber)
+    .filter(([key, completion]) =>
+      isMonitorableCompletionRecord(key, completion)
+      && (completion.occurrenceDate || toDateValue(completion.submittedAt)) === selectedDate
+    )
     .map(([key, completion]) => {
       const baseTask = state.tasks.find(
         (item) => String(item.taskId || item.id) === String(completion.taskId)
@@ -455,25 +548,17 @@ function renderApprovalsPage() {
     .map((task) => ({ task }))
     .sort((left, right) => (left.task.assigneeName || "").localeCompare(right.task.assigneeName || ""));
 
-  const visibleEntries = submittedEntries.filter(
-    (entry) =>
-      entry.completion.kamalApprovalStatus !== "pending" &&
-      entry.completion.hrApprovalStatus !== "pending" &&
-      entry.completion.cashierApprovalStatus !== "pending" &&
-      entry.completion.arunApprovalStatus !== "pending" &&
-      entry.completion.fuelRequestApprovalStatus !== "pending"
-  );
-  const completed = visibleEntries.filter(
+  const completed = submittedEntries.filter(
     (entry) => entry.completion.approvalStatus !== "approved" && entry.completion.status !== "not_completed"
   );
-  const notCompleted = visibleEntries.filter(
+  const notCompleted = submittedEntries.filter(
     (entry) => entry.completion.approvalStatus !== "approved" && entry.completion.status === "not_completed"
   );
-  const approved = visibleEntries.filter((entry) => entry.completion.approvalStatus === "approved");
+  const approved = submittedEntries.filter((entry) => entry.completion.approvalStatus === "approved");
 
   elements.approvalsPendingMeta.textContent = `${notSubmitted.length} task${notSubmitted.length === 1 ? "" : "s"} not yet submitted`;
-  elements.approvalsCompletedMeta.textContent = `${completed.length} submission${completed.length === 1 ? "" : "s"} awaiting review`;
-  elements.approvalsNotCompletedMeta.textContent = `${notCompleted.length} "not completed" submission${notCompleted.length === 1 ? "" : "s"} awaiting review`;
+  elements.approvalsCompletedMeta.textContent = `${completed.length} submitted checklist${completed.length === 1 ? "" : "s"} on ${formatDateValue(selectedDate)}`;
+  elements.approvalsNotCompletedMeta.textContent = `${notCompleted.length} "not completed" submission${notCompleted.length === 1 ? "" : "s"} on ${formatDateValue(selectedDate)}`;
   elements.approvalsApprovedMeta.textContent = `${approved.length} submission${approved.length === 1 ? "" : "s"} approved`;
   elements.approvalsPendingTabCount.textContent = String(notSubmitted.length);
   elements.approvalsCompletedTabCount.textContent = String(completed.length);
@@ -497,7 +582,7 @@ function renderApprovalsPage() {
     emptyState: elements.approvalsPendingEmpty,
     pagination: elements.approvalsPendingPagination,
     pageKey: "approvalsPendingPage",
-    headerRow: "<th>Task</th><th>Department</th><th>Task ID</th><th>Planned</th><th>Status</th>",
+    headerRow: "<th>Task</th><th>Customer</th><th>Walk-in ID</th><th>Department</th><th>Task ID</th><th>Planned</th><th>Status</th>",
     createRow: createNotSubmittedRow,
     countLabel: (count) => `task${count === 1 ? "" : "s"} pending`,
   });
@@ -507,9 +592,9 @@ function renderApprovalsPage() {
     emptyState: elements.approvalsCompletedEmpty,
     pagination: elements.approvalsCompletedPagination,
     pageKey: "approvalsCompletedPage",
-    headerRow: "<th>Task</th><th>Department</th><th>Task ID</th><th>Submitted</th><th>Details</th><th>Action</th>",
-    createRow: (entry) => createApprovalRow(entry, true),
-    countLabel: (count) => `submission${count === 1 ? "" : "s"} awaiting review`,
+    headerRow: "<th>Task</th><th>Customer</th><th>Walk-in ID</th><th>Department</th><th>Task ID</th><th>Submitted</th><th>Details</th><th>Review</th>",
+    createRow: (entry) => createApprovalRow(entry, canReview),
+    countLabel: (count) => `submission${count === 1 ? "" : "s"} submitted`,
   });
 
   renderGroupedApprovalRows(notCompleted, {
@@ -517,9 +602,9 @@ function renderApprovalsPage() {
     emptyState: elements.approvalsNotCompletedEmpty,
     pagination: elements.approvalsNotCompletedPagination,
     pageKey: "approvalsNotCompletedPage",
-    headerRow: "<th>Task</th><th>Department</th><th>Task ID</th><th>Submitted</th><th>Reason</th><th>Action</th>",
-    createRow: (entry) => createApprovalRow(entry, true),
-    countLabel: (count) => `"not completed" submission${count === 1 ? "" : "s"} awaiting review`,
+    headerRow: "<th>Task</th><th>Customer</th><th>Walk-in ID</th><th>Department</th><th>Task ID</th><th>Submitted</th><th>Reason</th><th>Review</th>",
+    createRow: (entry) => createApprovalRow(entry, canReview),
+    countLabel: (count) => `"not completed" submission${count === 1 ? "" : "s"}`,
   });
 
   renderGroupedApprovalRows(approved, {
@@ -527,12 +612,474 @@ function renderApprovalsPage() {
     emptyState: elements.approvalsApprovedEmpty,
     pagination: elements.approvalsApprovedPagination,
     pageKey: "approvalsApprovedPage",
-    headerRow: "<th>Task</th><th>Department</th><th>Task ID</th><th>Submitted</th><th>Details</th><th>Approved by</th>",
-    createRow: (entry) => createApprovalRow(entry, false),
+    headerRow: "<th>Task</th><th>Customer</th><th>Walk-in ID</th><th>Department</th><th>Task ID</th><th>Submitted</th><th>Details</th><th>Review</th>",
+    createRow: (entry) => createApprovalRow(entry, canReview),
     countLabel: (count) => `submission${count === 1 ? "" : "s"} approved`,
   });
 
   renderApprovalsLivePage(activeTab === "live");
+}
+
+
+function getCompletionEntryForKey(completionKey) {
+  const completion = state.completions[completionKey];
+  if (!completion) {
+    return null;
+  }
+
+  const baseTask = state.tasks.find((item) => String(item.taskId || item.id) === String(completion.taskId));
+  const occurrenceDate = completion.occurrenceDate || toDateValue(completion.submittedAt) || todayValue();
+  const task = baseTask
+    ? createTaskOccurrence(baseTask, new Date(`${occurrenceDate}T00:00:00`), {
+        occurrenceSlot: completion.occurrenceSlot,
+        occurrenceSlotLabel: completion.occurrenceSlotLabel,
+      })
+    : {
+        id: completion.taskId,
+        taskId: completion.taskId,
+        title: "Checklist submission",
+        assigneeName: completion.submittedByName || "-",
+        department: "-",
+        occurrenceDate,
+        occurrenceSlot: completion.occurrenceSlot || null,
+        occurrenceSlotLabel: completion.occurrenceSlotLabel || "",
+      };
+
+  return { key: completionKey, completion, task };
+}
+
+
+function openSubmissionDetailsModal(completionKey) {
+  const entry = getCompletionEntryForKey(completionKey);
+  if (!entry || !elements.submissionDetailsModal) {
+    return;
+  }
+
+  state.activeSubmissionDetailsKey = completionKey;
+  renderSubmissionDetailsModal(entry);
+  elements.submissionDetailsModal.classList.remove("hidden");
+  elements.submissionDetailsModal.setAttribute("aria-hidden", "false");
+}
+
+
+function closeSubmissionDetailsModal() {
+  state.activeSubmissionDetailsKey = null;
+  if (!elements.submissionDetailsModal) {
+    return;
+  }
+
+  elements.submissionDetailsModal.classList.add("hidden");
+  elements.submissionDetailsModal.setAttribute("aria-hidden", "true");
+}
+
+
+function renderSubmissionDetailsModal(entry) {
+  const { task, completion } = entry;
+  const statusLabel = getCompletionStatusLabel(completion);
+  elements.submissionDetailsTitle.textContent = getTaskDisplayTitle(task);
+  elements.submissionDetailsMeta.textContent = `${task.assigneeName || "-"} | ${formatTaskDate(task)} | ${statusLabel}`;
+  elements.submissionDetailsBody.innerHTML = createSubmissionDetailsMarkup(task, completion);
+}
+
+
+function createSubmissionDetailsMarkup(task, completion) {
+  const submittedBy = completion.submittedByName || task.assigneeName || "-";
+  const metaItems = [
+    createSubmissionMetaItem("Employee", task.assigneeName || "-"),
+    createSubmissionMetaItem("Department", normalizeValue(task.department)),
+    createSubmissionMetaItem("Task ID", task.taskId || task.id || "-"),
+    createSubmissionMetaItem("Planned date", formatTaskDate(task)),
+    createSubmissionMetaItem("Submitted at", formatDateTimeValue(completion.submittedAt)),
+    createSubmissionMetaItem("Submitted by", submittedBy),
+    createSubmissionMetaItem("Status", getCompletionStatusLabel(completion)),
+    createSubmissionMetaItem("Review stage", getCompletionReviewLabel(completion)),
+  ];
+
+  if (completion.approvedAt) {
+    metaItems.push(createSubmissionMetaItem("Approved at", formatDateTimeValue(completion.approvedAt)));
+  }
+
+  return `
+    <section class="submission-section">
+      <div class="submission-meta-grid">${metaItems.join("")}</div>
+    </section>
+    ${createSubmissionAnswersMarkup(task, completion)}
+  `;
+}
+
+
+function createSubmissionMetaItem(label, value) {
+  return `
+    <article class="submission-meta-card">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value || "-")}</strong>
+    </article>
+  `;
+}
+
+
+function createSubmissionAnswersMarkup(task, completion) {
+  if (completion.status === "not_completed") {
+    return `
+      <section class="submission-section">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Reason</p>
+            <h3>Why it was not completed</h3>
+          </div>
+        </div>
+        <div class="submission-answer submission-answer--full">
+          <strong>Remark</strong>
+          <span>${escapeHtml(completion.remarks || "No remark given")}</span>
+        </div>
+      </section>
+    `;
+  }
+
+  const responses = completion.responses || {};
+  if (!Object.keys(responses).length) {
+    return `
+      <section class="submission-section">
+        <div class="empty-state">No checklist answers were recorded for this submission.</div>
+      </section>
+    `;
+  }
+
+  if (isPantryTask(task) && Array.isArray(responses.items)) {
+    return createPantrySubmissionMarkup(completion, responses.items);
+  }
+
+  if (responses.generators) {
+    return createGroupedSubmissionSections("Generator", responses.generators, (name, sectionResponses) =>
+      createQuestionAnswerSection(name, buildGeneratorChecklistTemplate(sectionResponses?.generator_unit || name), sectionResponses)
+    );
+  }
+
+  if (responses.shifts) {
+    return createGroupedSubmissionSections("Shift", responses.shifts, (name, sectionResponses) =>
+      createQuestionAnswerSection(name, buildCashHandlingChecklistTemplate(sectionResponses?.shift || name), sectionResponses)
+    );
+  }
+
+  if (responses.locations) {
+    const buildTemplate = isMeterReadingChecklistTask(task)
+      ? (name, sectionResponses) => buildMeterReadingChecklistTemplate(sectionResponses?.location || name)
+      : (name, sectionResponses) => buildEarthingCleaningChecklistTemplate(sectionResponses?.location || name);
+    return createGroupedSubmissionSections("Location", responses.locations, (name, sectionResponses) =>
+      createQuestionAnswerSection(name, buildTemplate(name, sectionResponses), sectionResponses)
+    );
+  }
+
+  if (responses.visits) {
+    return createGroupedSubmissionSections("Visit", responses.visits, (name, sectionResponses) =>
+      createGenericResponseSection(`Visit ${name}`, sectionResponses)
+    );
+  }
+
+  return createQuestionAnswerSection("Checklist answers", getTemplateForSubmissionDetails(task, responses), responses);
+}
+
+
+function createPantrySubmissionMarkup(completion, items) {
+  const rowsMarkup = items
+    .map((item) => {
+      const isMismatch = item.submittedQuantity !== item.expectedQuantity;
+      return `
+        <tr>
+          <td>${escapeHtml(item.item)}</td>
+          <td>${escapeHtml(String(item.expectedQuantity))}</td>
+          <td>${escapeHtml(String(item.submittedQuantity))}</td>
+          <td>${isMismatch ? '<span class="status-badge status-badge--alert">Mismatch</span>' : '<span class="status-badge">Matched</span>'}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  return `
+    <section class="submission-section">
+      <div class="section-heading section-heading--wrap">
+        <div>
+          <p class="section-label">Checklist answers</p>
+          <h3>${escapeHtml(completion.location || "Pantry")} pantry count</h3>
+        </div>
+      </div>
+      <div class="table-shell">
+        <table class="user-table">
+          <thead>
+            <tr><th>Item</th><th>Expected</th><th>Submitted</th><th>Status</th></tr>
+          </thead>
+          <tbody>${rowsMarkup}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+}
+
+
+function createGroupedSubmissionSections(label, groups, createSection) {
+  const entries = Object.entries(groups || {}).filter(([, value]) => value);
+  if (!entries.length) {
+    return `
+      <section class="submission-section">
+        <div class="empty-state">No ${escapeHtml(label.toLowerCase())} details were recorded.</div>
+      </section>
+    `;
+  }
+
+  return entries
+    .map(([name, sectionResponses]) => createSection(name, sectionResponses))
+    .join("");
+}
+
+
+function getTemplateForSubmissionDetails(task, responses) {
+  if (isGeneratorChecklistTask(task)) {
+    return buildGeneratorChecklistTemplate(responses.generator_unit || responses.generator_no_selected || "");
+  }
+  if (isCashHandlingChecklistTask(task)) {
+    return buildCashHandlingChecklistTemplate(responses.shift || "Morning");
+  }
+  if (isMeterReadingChecklistTask(task)) {
+    return buildMeterReadingChecklistTemplate(responses.location || "MO1");
+  }
+  if (isEarthingCleaningTask(task)) {
+    return buildEarthingCleaningChecklistTemplate(responses.location || "MO1");
+  }
+  return getChecklistTemplate(task);
+}
+
+
+function createQuestionAnswerSection(title, template, responses) {
+  const questionMap = new Map();
+  (template?.questions || []).forEach((question) => {
+    questionMap.set(question.id, question.label || question.id);
+    if (question.followUpOnNo) {
+      questionMap.set(question.followUpOnNo.id, question.followUpOnNo.label || question.followUpOnNo.id);
+    }
+  });
+
+  const orderedKeys = (template?.questions || []).flatMap((question) => {
+    const keys = [question.id];
+    if (question.followUpOnNo) {
+      keys.push(question.followUpOnNo.id);
+    }
+    return keys;
+  });
+
+  const rows = [];
+  const seen = new Set();
+  orderedKeys.forEach((key) => {
+    if (!shouldShowSubmissionValue(responses[key])) {
+      return;
+    }
+    rows.push(createSubmissionAnswerRow(questionMap.get(key) || humanizeSubmissionKey(key), responses[key]));
+    seen.add(key);
+  });
+
+  Object.entries(responses || {}).forEach(([key, value]) => {
+    if (seen.has(key) || !shouldShowSubmissionValue(value)) {
+      return;
+    }
+    rows.push(createSubmissionAnswerRow(questionMap.get(key) || humanizeSubmissionKey(key), value));
+  });
+
+  return `
+    <section class="submission-section">
+      <div class="section-heading">
+        <div>
+          <p class="section-label">Checklist answers</p>
+          <h3>${escapeHtml(title)}</h3>
+        </div>
+      </div>
+      <div class="submission-answer-list">
+        ${rows.length ? rows.join("") : '<div class="empty-state">No filled answers were recorded for this section.</div>'}
+      </div>
+    </section>
+  `;
+}
+
+
+function createGenericResponseSection(title, responses) {
+  const rows = Object.entries(responses || {})
+    .filter(([, value]) => shouldShowSubmissionValue(value))
+    .map(([key, value]) => createSubmissionAnswerRow(humanizeSubmissionKey(key), value));
+
+  return `
+    <section class="submission-section">
+      <div class="section-heading">
+        <div>
+          <p class="section-label">Checklist answers</p>
+          <h3>${escapeHtml(title)}</h3>
+        </div>
+      </div>
+      <div class="submission-answer-list">
+        ${rows.length ? rows.join("") : '<div class="empty-state">No filled answers were recorded for this section.</div>'}
+      </div>
+    </section>
+  `;
+}
+
+
+function shouldShowSubmissionValue(value) {
+  if (value == null) {
+    return false;
+  }
+  if (typeof value === "string") {
+    return value.trim() !== "";
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  if (typeof value === "object") {
+    return Object.keys(value).length > 0;
+  }
+  return true;
+}
+
+
+function createSubmissionAnswerRow(label, value) {
+  return `
+    <article class="submission-answer">
+      <strong>${escapeHtml(label)}</strong>
+      <div>${createSubmissionValueMarkup(value)}</div>
+    </article>
+  `;
+}
+
+
+function createSubmissionValueMarkup(value) {
+  if (value == null || value === "") {
+    return '<span class="submission-empty-value">-</span>';
+  }
+
+  if (Array.isArray(value)) {
+    if (!value.length) {
+      return '<span class="submission-empty-value">-</span>';
+    }
+
+    if (value.every((item) => item == null || ["string", "number", "boolean"].includes(typeof item))) {
+      return `<div class="submission-pill-list">${value.map((item) => `<span class="submission-pill">${escapeHtml(formatSubmissionPrimitive(item))}</span>`).join("")}</div>`;
+    }
+
+    return createSubmissionObjectTableMarkup(value);
+  }
+
+  if (typeof value === "object") {
+    return createSubmissionObjectGroupMarkup(value);
+  }
+
+  return `<span>${escapeHtml(formatSubmissionPrimitive(value))}</span>`;
+}
+
+
+function createSubmissionObjectGroupMarkup(value) {
+  const entries = Object.entries(value).filter(([, nestedValue]) => shouldShowSubmissionValue(nestedValue));
+  if (!entries.length) {
+    return '<span class="submission-empty-value">-</span>';
+  }
+
+  return `
+    <div class="submission-nested-list">
+      ${entries
+        .map(
+          ([key, nestedValue]) => `
+            <div class="submission-nested-item">
+              <strong>${escapeHtml(humanizeSubmissionKey(key))}</strong>
+              <div>${createSubmissionValueMarkup(nestedValue)}</div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+
+function createSubmissionObjectTableMarkup(rows) {
+  const columnSet = new Set();
+  rows.forEach((row) => {
+    Object.keys(row || {}).forEach((key) => columnSet.add(key));
+  });
+
+  const columns = [...columnSet];
+  const headerMarkup = columns.map((column) => `<th>${escapeHtml(humanizeSubmissionKey(column))}</th>`).join("");
+  const bodyMarkup = rows
+    .map((row) => `
+      <tr>
+        ${columns.map((column) => `<td>${createSubmissionValueMarkup(row?.[column])}</td>`).join("")}
+      </tr>
+    `)
+    .join("");
+
+  return `
+    <div class="table-shell">
+      <table class="user-table submission-detail-table">
+        <thead><tr>${headerMarkup}</tr></thead>
+        <tbody>${bodyMarkup}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+
+function humanizeSubmissionKey(key) {
+  return String(key || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+
+function formatSubmissionPrimitive(value) {
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+  return String(value);
+}
+
+
+function getCompletionStatusLabel(completion) {
+  if (completion.approvalStatus === "approved") {
+    return "Approved";
+  }
+  if (completion.status === "not_completed") {
+    return "Not completed";
+  }
+  return "Submitted";
+}
+
+
+function getCompletionReviewLabel(completion) {
+  if (completion.approvalStatus === "approved") {
+    return completion.approvedByName ? `Approved by ${completion.approvedByName}` : "Approved";
+  }
+
+  const pendingStages = getPendingReviewStages(completion);
+  if (pendingStages.length) {
+    return `Waiting for ${pendingStages.join(", ")}`;
+  }
+
+  return "Pending final review";
+}
+
+
+function getPendingReviewStages(completion) {
+  const stages = [];
+  if (completion.hrApprovalStatus === "pending") {
+    stages.push("HR approval");
+  }
+  if (completion.kamalApprovalStatus === "pending") {
+    stages.push("Kamal approval");
+  }
+  if (completion.cashierApprovalStatus === "pending") {
+    stages.push("Cashier approval");
+  }
+  if (completion.arunApprovalStatus === "pending") {
+    stages.push("Arun approval");
+  }
+  if (completion.fuelRequestApprovalStatus === "pending") {
+    stages.push("fuel approval");
+  }
+  return stages;
 }
 
 
@@ -636,9 +1183,45 @@ function groupEntriesByAssignee(entries) {
   return [...groups.values()].sort((left, right) => left.assigneeName.localeCompare(right.assigneeName));
 }
 
+
+function getTaskCustomerLabel(task) {
+  return task.customerAttributionName || task.customerName || "-";
+}
+
+
+function getTaskCustomerKey(task) {
+  return task.customerAttributionKey || task.walkinId || "";
+}
+
+
+function getCustomerCountForEntries(entries) {
+  return new Set(
+    entries
+      .map((entry) => getTaskCustomerKey(entry.task))
+      .filter(Boolean)
+  ).size;
+}
+
+function getEmployeeCountForEntries(entries) {
+  return new Set(
+    entries
+      .map((entry) => normalizeValue(entry.task?.assigneeName || entry.completion?.submittedByName || ""))
+      .filter((name) => name && name !== "-")
+  ).size;
+}
+
 const APPROVALS_GROUP_PAGE_SIZE = 4;
 
-function renderGroupedApprovalRows(entries, { board, emptyState, pagination, pageKey, headerRow, createRow, countLabel }) {
+function renderGroupedApprovalRows(entries, {
+  board,
+  emptyState,
+  pagination,
+  pageKey,
+  headerRow,
+  createRow,
+  countLabel,
+  rerender = renderApprovalsPage,
+}) {
   board.innerHTML = "";
   emptyState.classList.toggle("hidden", entries.length > 0);
 
@@ -665,7 +1248,7 @@ function renderGroupedApprovalRows(entries, { board, emptyState, pagination, pag
 
   renderPaginationControls(pagination, state[pageKey], totalPages, (page) => {
     state[pageKey] = page;
-    renderApprovalsPage();
+    rerender();
   });
 }
 
@@ -675,6 +1258,10 @@ function createApprovalGroupCard(group, { headerRow, createRow, countLabel }) {
   card.className = "task-card task-card--admin task-card--group";
 
   const rowsMarkup = group.entries.map((entry) => createRow(entry).outerHTML).join("");
+  const customerCount = getCustomerCountForEntries(group.entries);
+  const badgeText = customerCount
+    ? `${customerCount} customer${customerCount === 1 ? "" : "s"} · ${group.entries.length} ${countLabel(group.entries.length)}`
+    : `${group.entries.length} ${countLabel(group.entries.length)}`;
 
   card.innerHTML = `
     <summary class="admin-task-summary">
@@ -683,9 +1270,10 @@ function createApprovalGroupCard(group, { headerRow, createRow, countLabel }) {
           <strong>${escapeHtml(group.assigneeName)}</strong>
           <div class="task-card__meta">
             <span>Department ${escapeHtml(normalizeValue(group.department))}</span>
+            ${customerCount ? `<span>${escapeHtml(String(customerCount))} customer${customerCount === 1 ? "" : "s"}</span>` : ""}
           </div>
         </div>
-        <span class="task-badge">${escapeHtml(String(group.entries.length))} ${escapeHtml(countLabel(group.entries.length))}</span>
+        <span class="task-badge">${escapeHtml(badgeText)}</span>
       </div>
     </summary>
     <div class="table-shell">
@@ -704,6 +1292,8 @@ function createNotSubmittedRow(entry) {
   const row = document.createElement("tr");
   row.innerHTML = `
     <td>${escapeHtml(getTaskDisplayTitle(task))}</td>
+    <td>${escapeHtml(getTaskCustomerLabel(task))}</td>
+    <td>${escapeHtml(getTaskCustomerKey(task) || "-")}</td>
     <td>${escapeHtml(normalizeValue(task.department))}</td>
     <td>${escapeHtml(task.taskId || task.id)}</td>
     <td>${escapeHtml(formatTaskDate(task))}</td>
@@ -713,27 +1303,52 @@ function createNotSubmittedRow(entry) {
 }
 
 
-function createApprovalRow(entry, isAwaitingApproval) {
+function createApprovalRow(entry, canReview) {
   const { key, completion, task } = entry;
   const row = document.createElement("tr");
-  const submittedLabel = new Date(completion.submittedAt).toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-
-  const actionCell = isAwaitingApproval
-    ? `<button type="button" class="status-button" data-approve-completion="${escapeHtml(key)}">Approve</button>`
-    : `<span class="status-badge">${escapeHtml(completion.approvedByName || "-")}</span>`;
+  const pendingStages = getPendingReviewStages(completion);
+  const canApproveNow = canReview && completion.approvalStatus !== "approved" && !pendingStages.length;
+  const reviewCell = completion.approvalStatus === "approved"
+    ? `<span class="status-badge">${escapeHtml(completion.approvedByName || "Approved")}</span>`
+    : canApproveNow
+      ? `<button type="button" class="status-button" data-approve-completion="${escapeHtml(key)}">Approve</button>`
+      : `<span class="status-badge">${escapeHtml(getCompletionReviewLabel(completion))}</span>`;
 
   row.innerHTML = `
     <td>${escapeHtml(getTaskDisplayTitle(task))}</td>
+    <td>${escapeHtml(getTaskCustomerLabel(task))}</td>
+    <td>${escapeHtml(getTaskCustomerKey(task) || "-")}</td>
     <td>${escapeHtml(normalizeValue(task.department))}</td>
     <td>${escapeHtml(task.taskId || task.id)}</td>
-    <td>${escapeHtml(submittedLabel)}</td>
+    <td>${escapeHtml(formatDateTimeValue(completion.submittedAt))}</td>
+    <td>
+      <div class="submission-detail-cell">
+        <span>${escapeHtml(summarizeCompletion(task, completion))}</span>
+        <button type="button" class="button button--ghost submission-detail-button" data-open-submission-details="${escapeHtml(key)}">
+          View details
+        </button>
+      </div>
+    </td>
+    <td>${reviewCell}</td>
+  `;
+  return row;
+}
+
+
+function createPcSubmittedGroupRow(entry) {
+  const { key, completion, task } = entry;
+  const row = document.createElement("tr");
+  row.innerHTML = `
+    <td>${escapeHtml(getTaskCustomerLabel(task))}</td>
+    <td>${escapeHtml(getTaskCustomerKey(task) || "-")}</td>
+    <td>${escapeHtml(getTaskDisplayTitle(task))}</td>
     <td>${escapeHtml(summarizeCompletion(task, completion))}</td>
-    <td>${actionCell}</td>
+    <td>${escapeHtml(formatDateTimeValue(completion.submittedAt))}</td>
+    <td>
+      <button type="button" class="button button--ghost submission-detail-button" data-open-submission-details="${escapeHtml(key)}">
+        View details
+      </button>
+    </td>
   `;
   return row;
 }
@@ -810,49 +1425,79 @@ function renderPaginationControls(container, currentPage, totalPages, onPageChan
 }
 
 
-function renderWalkinCustomerBoard() {
-  const today = todayValue();
-  const myWalkinTasks = state.tasks
+function getWalkinTaskBoardDate(task) {
+  return task.walkinDate || task.occurrenceDate || task.plannedDate || toDateValue(task.createdAt) || "";
+}
+
+
+function getAssignedWalkinGroupsByDate(user) {
+  const groupsByDate = new Map();
+  if (!user) {
+    return groupsByDate;
+  }
+
+  state.tasks
     .filter(
       (task) =>
-        task.source === "walkin" && task.active !== false && isTaskAssignedToUser(task, state.activeUser)
+        task.source === "walkin" && task.active !== false && isTaskAssignedToUser(task, user)
     )
-    // These are one-time tasks read directly (not run through
-    // expandTaskForDateRange), so occurrenceDate has to be set by hand to
-    // match what the normal occurrence pipeline would produce — every
-    // completion-key/availability helper below depends on it being present.
-    .map((task) => ({ ...task, occurrenceDate: task.plannedDate }));
+    .forEach((task) => {
+      const walkinDate = getWalkinTaskBoardDate(task);
+      const walkinId = String(task.walkinId || "").trim()
+        || `${task.taskId || task.id || task.title || "walkin"}__${walkinDate}`;
+      const customerName = String(task.customerName || "").trim() || "Walk-in customer";
+      const taskWithOccurrenceDate = { ...task, occurrenceDate: walkinDate || task.plannedDate };
 
-  const groupsById = new Map();
-  myWalkinTasks.forEach((task) => {
-    if (!groupsById.has(task.walkinId)) {
-      groupsById.set(task.walkinId, {
-        walkinId: task.walkinId,
-        customerName: task.customerName,
-        walkinDate: task.walkinDate,
-        department: task.department,
-        details: task.details,
-        tasks: [],
-      });
-    }
-    groupsById.get(task.walkinId).tasks.push(task);
+      if (!groupsByDate.has(walkinDate)) {
+        groupsByDate.set(walkinDate, new Map());
+      }
+
+      const groupsForDate = groupsByDate.get(walkinDate);
+      if (!groupsForDate.has(walkinId)) {
+        groupsForDate.set(walkinId, {
+          walkinId,
+          customerName,
+          walkinDate,
+          department: task.department,
+          details: task.details,
+          tasks: [],
+        });
+      }
+
+      groupsForDate.get(walkinId).tasks.push(taskWithOccurrenceDate);
+    });
+
+  const normalizedGroupsByDate = new Map();
+  groupsByDate.forEach((groupsForDate, walkinDate) => {
+    const groups = [...groupsForDate.values()]
+      .map((group) => {
+        const tasks = [...group.tasks].sort((left, right) => {
+          const sequenceDiff = getTaskSequenceValue(left) - getTaskSequenceValue(right);
+          if (sequenceDiff !== 0) {
+            return sequenceDiff;
+          }
+          return getTaskDisplayTitle(left).localeCompare(getTaskDisplayTitle(right));
+        });
+        const completedCount = tasks.filter((task) => getCompletionRecord(task)).length;
+        return { ...group, tasks, completedCount, total: tasks.length };
+      })
+      .sort((left, right) => left.customerName.localeCompare(right.customerName));
+
+    normalizedGroupsByDate.set(walkinDate, groups);
   });
 
+  return normalizedGroupsByDate;
+}
+
+
+function renderWalkinCustomerBoard(walkinGroupsByDate = getAssignedWalkinGroupsByDate(state.activeUser)) {
+  const today = todayValue();
   // Strictly today's handovers only — a customer disappears at midnight
   // regardless of whether their checklist was finished, and tomorrow's
   // handovers replace them.
-  const groups = [...groupsById.values()]
-    .map((group) => {
-      const completedCount = group.tasks.filter((task) => getCompletionRecord(task)).length;
-      return { ...group, completedCount, total: group.tasks.length };
-    })
-    .filter((group) => group.walkinDate === today)
-    .sort((left, right) => left.customerName.localeCompare(right.customerName));
+  const groups = walkinGroupsByDate.get(today) || [];
 
   state.visibleWalkinTasks = groups.flatMap((group) => group.tasks);
-  // Used by the generic (non-walkin) task rows below to also attribute them
-  // to today's customer(s) — one row per customer, each independently
-  // completable, mirroring how the walk-in board itself behaves.
   state.todayWalkinCustomers = groups.map((group) => ({
     walkinId: group.walkinId,
     customerName: group.customerName,
@@ -932,7 +1577,8 @@ function renderEmployeeTaskBoard() {
     taskTable.classList.toggle("hide-customer-columns", state.activeUser.role !== "salesman");
   }
 
-  renderWalkinCustomerBoard();
+  const walkinGroupsByDate = getAssignedWalkinGroupsByDate(state.activeUser);
+  renderWalkinCustomerBoard(walkinGroupsByDate);
 
   const myOwnTasks = state.tasks.filter(
     (task) => isTaskAssignedToUser(task, state.activeUser)
@@ -971,19 +1617,18 @@ function renderEmployeeTaskBoard() {
 
   // Walk-in tasks get their own per-customer board (renderWalkinCustomerBoard
   // above) — keep them out of this flat table so they aren't shown twice.
-  // Generic tasks landing on today get cloned once per today's customer
-  // (each independently completable via customerAttributionKey feeding into
-  // getCompletionKey/getTaskOccurrenceIdentity) so they're attributed the
-  // same way the walk-in board's tasks already are.
-  const today = todayValue();
+  // Generic checklist rows get cloned once per customer handed over on that
+  // same occurrence date, so customer/deal attribution stays correct for any
+  // synced salesman, on any date, without relying on UI state side effects.
   const displayOccurrences = occurrences
     .filter((task) => task.source !== "walkin")
     .flatMap((task) => {
       const occurrenceDate = task.occurrenceDate || task.plannedDate;
-      if (occurrenceDate !== today || !state.todayWalkinCustomers.length) {
+      const walkinGroups = walkinGroupsByDate.get(occurrenceDate) || [];
+      if (!walkinGroups.length) {
         return [task];
       }
-      return state.todayWalkinCustomers.map((customer) => ({
+      return walkinGroups.map((customer) => ({
         ...task,
         customerAttributionKey: customer.walkinId,
         customerAttributionName: customer.customerName,
@@ -1324,6 +1969,13 @@ function renderCompliancePage() {
 
   // Default range only fills in once (both fields start empty) — later
   // renders (periodic refresh, etc.) respect whatever the admin has set.
+  if (!canMonitorChecklists(state.activeUser)) {
+    elements.complianceMeta.textContent = "";
+    elements.complianceBoard.innerHTML = "";
+    elements.complianceEmptyState.classList.add("hidden");
+    return;
+  }
+
   if (!elements.complianceStartDate.value) {
     elements.complianceStartDate.value = "2026-07-22";
   }
@@ -1362,10 +2014,16 @@ function createComplianceDayCard(day) {
         <tr>
           <td>${escapeHtml(entry.task.assigneeName || "-")}</td>
           <td>${escapeHtml(getTaskDisplayTitle(entry.task))}</td>
+          <td>${entry.completion ? escapeHtml(formatDateTimeValue(entry.completion.submittedAt)) : "-"}</td>
           <td>${
             entry.completion
-              ? '<span class="status-badge">Completed</span>'
+              ? `<span class="status-badge">${escapeHtml(getCompletionStatusLabel(entry.completion))}</span>`
               : '<span class="status-badge status-badge--alert">Not submitted</span>'
+          }</td>
+          <td>${
+            entry.completion
+              ? `<button type="button" class="button button--ghost submission-detail-button" data-open-submission-details="${escapeHtml(entry.completionKey)}">View details</button>`
+              : "-"
           }</td>
         </tr>
       `
@@ -1385,7 +2043,7 @@ function createComplianceDayCard(day) {
     </summary>
     <div class="table-shell">
       <table class="user-table">
-        <thead><tr><th>Employee</th><th>Task</th><th>Status</th></tr></thead>
+        <thead><tr><th>Employee</th><th>Task</th><th>Submitted</th><th>Status</th><th>Details</th></tr></thead>
         <tbody>${rowsMarkup}</tbody>
       </table>
     </div>
@@ -1402,12 +2060,12 @@ function renderSidebarVisibility() {
 
   const approvalsLink = document.querySelector('.sidebar-link[data-view="approvals"]');
   if (approvalsLink) {
-    approvalsLink.classList.toggle("hidden", !canAssignTasks(state.activeUser));
+    approvalsLink.classList.toggle("hidden", !canMonitorChecklists(state.activeUser));
   }
 
   const complianceLink = document.querySelector('.sidebar-link[data-view="compliance"]');
   if (complianceLink) {
-    complianceLink.classList.toggle("hidden", !canAssignTasks(state.activeUser));
+    complianceLink.classList.toggle("hidden", !canMonitorChecklists(state.activeUser));
   }
 }
 

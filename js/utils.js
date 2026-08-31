@@ -402,6 +402,9 @@ function getDashboardSubtitle(user) {
   if (canAssignTasks(user)) {
     return "Search your task board, choose a date, and assign work directly to team members.";
   }
+  if (canMonitorChecklists(user)) {
+    return "Monitor who submitted checklists, who missed them, and what was filled in for each submission.";
+  }
   if (isAdmin(user)) {
     return "Review the latest assigned work and track activity from your MoTrack dashboard.";
   }
@@ -424,6 +427,13 @@ function isAdmin(user) {
 }
 
 
+function isPcMonitorUser(user) {
+  const role = normalizeValue(user?.role).toLowerCase();
+  const designation = normalizeValue(user?.designation).toLowerCase();
+  return role === "pc" || designation === "pc";
+}
+
+
 function canManageUsers(user) {
   return isAdmin(user);
 }
@@ -431,6 +441,66 @@ function canManageUsers(user) {
 
 function canAssignTasks(user) {
   return isAdmin(user) && normalizeValue(user?.designation).toLowerCase().includes("ea");
+}
+
+
+function canMonitorChecklists(user) {
+  return canAssignTasks(user) || isPcMonitorUser(user);
+}
+
+
+function getDefaultViewForUser(user) {
+  return "home";
+}
+
+
+function isChildCompletionRecord(completionKey) {
+  const key = String(completionKey || "");
+  return (
+    key.includes("__visit") ||
+    key.includes("__generator__") ||
+    key.includes("__cashshift__") ||
+    key.includes("__meterlocation__") ||
+    key.includes("__earthinglocation__")
+  );
+}
+
+
+function isMonitorableCompletionRecord(completionKey, completion) {
+  return Boolean(completion) && !isChildCompletionRecord(completionKey);
+}
+
+
+function getLatestMonitorableCompletionDate() {
+  if (!state?.completions || typeof state.completions !== "object") {
+    return "";
+  }
+
+  return Object.entries(state.completions)
+    .filter(([key, completion]) => isMonitorableCompletionRecord(key, completion))
+    .map(([, completion]) => completion.occurrenceDate || toDateValue(completion.submittedAt))
+    .filter(Boolean)
+    .sort((left, right) => right.localeCompare(left))[0] || "";
+}
+
+
+function getDefaultApprovalsDateForUser(user) {
+  return todayValue();
+}
+
+
+function formatDateTimeValue(value) {
+  if (!value) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 

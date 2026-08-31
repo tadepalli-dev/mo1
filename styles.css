@@ -209,6 +209,10 @@ h1 {
   flex-wrap: wrap;
 }
 
+.pc-dashboard__date {
+  min-width: min(100%, 260px);
+}
+
 .preview-users,
 .mobile-cards {
   display: grid;
@@ -1574,6 +1578,99 @@ textarea {
 
 .modal-card--wide {
   width: min(920px, 100%);
+}
+
+.submission-details {
+  display: grid;
+  gap: 1rem;
+}
+
+.submission-section {
+  display: grid;
+  gap: 1rem;
+}
+
+.submission-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+}
+
+.submission-meta-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.submission-meta-card span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.submission-answer-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.submission-answer {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.submission-answer--full span {
+  white-space: pre-wrap;
+}
+
+.submission-detail-cell {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.submission-detail-button {
+  width: fit-content;
+  min-width: 0;
+}
+
+.submission-pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.submission-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(34, 103, 92, 0.1);
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.submission-nested-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.submission-nested-item {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: var(--radius-md);
+  background: rgba(34, 103, 92, 0.06);
+}
+
+.submission-empty-value {
+  color: var(--muted);
 }
 
 .checklist-form {

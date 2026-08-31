@@ -10,7 +10,7 @@ async function initialize() {
   setHomeDefaults();
   bindEvents();
   if (state.currentView === "approvals") {
-    elements.approvalsDateInput.value = todayValue();
+    elements.approvalsDateInput.value = getDefaultApprovalsDateForUser(state.activeUser);
   }
   renderDashboard();
   loadSheetLeaveData();
@@ -49,6 +49,7 @@ function bindEvents() {
   elements.departmentSelect.addEventListener("change", handleEmployeeTaskFilterChange);
   elements.homeSearchInput.addEventListener("input", handleHomeSearch);
   elements.dashboardDateInput.addEventListener("change", handleAdminDateChange);
+  elements.pcMonitorDateInput?.addEventListener("change", handlePcMonitorDateChange);
   elements.closeAssignTaskButton.addEventListener("click", closeAssignTaskModal);
   elements.assignTaskModal.addEventListener("click", handleAssignModalBackdropClick);
   elements.assignTaskForm.addEventListener("submit", handleAssignTask);
@@ -70,13 +71,20 @@ function bindEvents() {
   elements.closeNotCompletedButton.addEventListener("click", closeNotCompletedModal);
   elements.notCompletedModal.addEventListener("click", handleNotCompletedModalBackdropClick);
   elements.notCompletedForm.addEventListener("submit", handleNotCompletedSubmit);
+  elements.closeSubmissionDetailsButton.addEventListener("click", closeSubmissionDetailsModal);
+  elements.submissionDetailsModal.addEventListener("click", handleSubmissionDetailsModalBackdropClick);
   setupVoiceInput(elements.notCompletedMicButton, elements.notCompletedRemarks, elements.notCompletedVoiceStatus);
   elements.approvalsDateInput.addEventListener("change", handleApprovalsDateChange);
   elements.complianceStartDate.addEventListener("change", handleComplianceDateChange);
   elements.complianceEndDate.addEventListener("change", handleComplianceDateChange);
   elements.resyncSubmissionReportButton.addEventListener("click", handleResyncSubmissionReport);
+  elements.pcSubmittedBoard?.addEventListener("click", handleSubmissionDetailsAction);
   elements.approvalsCompletedBoard.addEventListener("click", handleApprovalsAction);
+  elements.approvalsCompletedBoard.addEventListener("click", handleSubmissionDetailsAction);
   elements.approvalsNotCompletedBoard.addEventListener("click", handleApprovalsAction);
+  elements.approvalsNotCompletedBoard.addEventListener("click", handleSubmissionDetailsAction);
+  elements.approvalsApprovedBoard.addEventListener("click", handleSubmissionDetailsAction);
+  elements.complianceBoard.addEventListener("click", handleSubmissionDetailsAction);
   elements.kamalApprovalBoard.addEventListener("click", handleKamalApprovalAction);
   elements.fuelApprovalBoard.addEventListener("click", handleFuelRequestApprovalAction);
   elements.arunApprovalBoard.addEventListener("click", handleArunApprovalAction);
@@ -100,6 +108,9 @@ function bindEvents() {
       }
       if (!elements.checklistModal.classList.contains("hidden")) {
         closeChecklistModal();
+      }
+      if (!elements.submissionDetailsModal.classList.contains("hidden")) {
+        closeSubmissionDetailsModal();
       }
     }
   });

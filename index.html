@@ -263,6 +263,39 @@
               </div>
             </section>
 
+            <section id="pcDashboardPanel" class="panel role-dashboard hidden">
+              <div class="section-heading section-heading--wrap">
+                <div>
+                  <p class="section-label">PC Dashboard</p>
+                  <h2 id="pcDashboardWelcome">Checklist monitoring</h2>
+                  <p class="dashboard-copy">
+                    See who submitted checklist tasks and open the filled details for verification.
+                  </p>
+                </div>
+                <label class="toolbar-field pc-dashboard__date">
+                  <span>Checklist date</span>
+                  <input type="date" id="pcMonitorDateInput" />
+                </label>
+              </div>
+
+              <div id="pcTodaySummary" class="board-meta"></div>
+
+              <div id="pcSubmittedSection" class="pantry-alerts-section">
+                <div class="board-heading">
+                  <div>
+                    <p class="section-label">Monitor</p>
+                    <h3>Submitted checklists</h3>
+                  </div>
+                  <p id="pcSubmittedMeta" class="board-meta"></p>
+                </div>
+                <div id="pcSubmittedBoard" class="task-board"></div>
+                <div id="pcSubmittedEmpty" class="empty-state hidden">
+                  No checklist submissions are available yet.
+                </div>
+                <div id="pcSubmittedPagination" class="pagination"></div>
+              </div>
+            </section>
+
             <section id="employeeDashboardPanel" class="panel role-dashboard hidden">
               <div class="employee-table-header">
                 <div>
@@ -1098,6 +1131,30 @@
             <p id="notCompletedMessage" class="message" aria-live="polite"></p>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div id="submissionDetailsModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-card modal-card--wide">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Checklist Monitor</p>
+            <h2 id="submissionDetailsTitle">Submission details</h2>
+            <p id="submissionDetailsMeta" class="dashboard-copy"></p>
+          </div>
+          <button
+            type="button"
+            id="closeSubmissionDetailsButton"
+            class="sidebar-close modal-close"
+            aria-label="Close submission details"
+          >
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.42L10.59 13.4 4.29 19.7 2.88 18.3 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z"></path>
+            </svg>
+          </button>
+        </div>
+
+        <div id="submissionDetailsBody" class="submission-details"></div>
       </div>
     </div>
 

@@ -111,7 +111,8 @@ async function handleLogin(event) {
   await refreshStateFromServer();
 
   state.activeUser = result.user;
-  state.currentView = allowedView(state.currentView);
+  state.pcMonitorDate = todayValue();
+  state.currentView = state.currentView === "home" ? getDefaultViewForUser(result.user) : allowedView(state.currentView);
   saveSession(result.user.email);
   saveRememberedEmail();
   toggleViews(true);
@@ -559,7 +560,7 @@ async function handleResyncSubmissionReport() {
     }
     setStatusMessage(
       elements.resyncSubmissionReportMessage,
-      `Sheet updated — ${result.rowCount ?? "all"} rows written.`,
+      `Sheets updated — ${result.rowCount ?? "all"} audit rows and ${result.detailsRowCount ?? 0} detailed submission rows written.`,
       "success"
     );
   } catch (error) {
@@ -1307,6 +1308,13 @@ function handleEmployeeTaskFilterChange() {
 }
 
 
+function handlePcMonitorDateChange() {
+  state.pcMonitorDate = elements.pcMonitorDateInput.value || todayValue();
+  state.pcSubmittedPage = 1;
+  renderPcDashboardPanel();
+}
+
+
 function handleApprovalsDateChange() {
   state.approvalsPendingPage = 1;
   state.approvalsCompletedPage = 1;
@@ -1350,6 +1358,10 @@ function syncLiveMapRefreshTimer() {
 
 
 function handleApprovalsAction(event) {
+  if (!canAssignTasks(state.activeUser)) {
+    return;
+  }
+
   const trigger = event.target.closest("[data-approve-completion]");
   if (!trigger) {
     return;
@@ -1367,6 +1379,16 @@ function handleApprovalsAction(event) {
 
   saveCompletions();
   renderApprovalsPage();
+}
+
+
+function handleSubmissionDetailsAction(event) {
+  const trigger = event.target.closest("[data-open-submission-details]");
+  if (!trigger) {
+    return;
+  }
+
+  openSubmissionDetailsModal(trigger.getAttribute("data-open-submission-details"));
 }
 
 
@@ -1475,6 +1497,13 @@ function handleNotCompletedModalBackdropClick(event) {
 }
 
 
+function handleSubmissionDetailsModalBackdropClick(event) {
+  if (event.target === elements.submissionDetailsModal) {
+    closeSubmissionDetailsModal();
+  }
+}
+
+
 function handleEmployeeTaskAction(event) {
   const requestTrigger = event.target.closest("[data-request-fuel-task]");
   if (requestTrigger) {
@@ -1525,6 +1554,7 @@ function handleFuelRequestSubmit(trigger) {
   };
 
   saveCompletions();
+  syncSubmissionReport();
   renderEmployeeTaskBoard();
   renderApprovalsPage();
 }
@@ -1591,6 +1621,7 @@ async function logout() {
   state.activeUser = null;
   state.currentView = "home";
   state.isSidebarCollapsed = false;
+  state.pcMonitorDate = todayValue();
   state.activeChecklistTask = null;
   localStorage.removeItem(STORAGE_KEYS.session);
   clearAuthToken();
@@ -1777,6 +1808,7 @@ function handleNotCompletedSubmit(event) {
   };
 
   saveCompletions();
+  syncSubmissionReport();
   closeNotCompletedModal();
   renderEmployeeTaskBoard();
   renderApprovalsPage();
@@ -1846,6 +1878,9 @@ function collectCashCoinRows() {
 
 function setHomeDefaults() {
   elements.dashboardDateInput.value = state.adminDate;
+  if (elements.pcMonitorDateInput) {
+    elements.pcMonitorDateInput.value = state.pcMonitorDate || todayValue();
+  }
   elements.dateRangeSelect.value = "today";
   elements.taskSelect.value = "all";
   if (elements.absenceDateInput) {
@@ -1873,7 +1908,7 @@ function restoreSession() {
   }
 
   state.activeUser = matchedUser;
-  state.currentView = allowedView(state.currentView);
+  state.currentView = state.currentView === "home" ? getDefaultViewForUser(matchedUser) : allowedView(state.currentView);
   toggleViews(true);
 }
 
@@ -1892,8 +1927,8 @@ function restoreRememberedEmail() {
 function setCurrentView(view) {
   state.currentView = allowedView(view);
   window.location.hash = state.currentView;
-  if (state.currentView === "approvals") {
-    elements.approvalsDateInput.value = todayValue();
+  if (state.currentView === "approvals" && !elements.approvalsDateInput.value) {
+    elements.approvalsDateInput.value = getDefaultApprovalsDateForUser(state.activeUser);
   }
   if (state.currentView === "home") {
     state.employeeTaskPage = 1;
@@ -1918,10 +1953,10 @@ function allowedView(view) {
   if (view === "users" && canManageUsers(state.activeUser)) {
     return "users";
   }
-  if (view === "approvals" && canAssignTasks(state.activeUser)) {
+  if (view === "approvals" && canMonitorChecklists(state.activeUser)) {
     return "approvals";
   }
-  if (view === "compliance" && canAssignTasks(state.activeUser)) {
+  if (view === "compliance" && canMonitorChecklists(state.activeUser)) {
     return "compliance";
   }
   return "home";

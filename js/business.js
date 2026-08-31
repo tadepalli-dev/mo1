@@ -897,7 +897,11 @@ function getComplianceReportForDateRange(startDateValue, endDateValue) {
       .filter((task) => isTaskCompletionEnabled(task) || getCompletionRecord(task));
 
     const entries = occurrences
-      .map((task) => ({ task, completion: getCompletionRecord(task) }))
+      .map((task) => ({
+        task,
+        completionKey: getCompletionKey(task),
+        completion: getCompletionRecord(task),
+      }))
       .sort((left, right) => (left.task.assigneeName || "").localeCompare(right.task.assigneeName || ""));
 
     const missedCount = entries.filter((entry) => !entry.completion).length;

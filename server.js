@@ -8,6 +8,7 @@ const { getServiceAccountEmail, lookupVehicleAssignment } = require("./lib/vehic
 const { rewriteSubmissionReport } = require("./lib/submission-report-export");
 const { buildSubmissionAuditRows } = require("./lib/submission-audit");
 const { appendClientFormSubmissionRow } = require("./lib/client-form-sheet-export");
+const { rewriteSubmittedTaskDetailsSheet } = require("./lib/submitted-task-details-export");
 
 const DEFAULT_PORT = Number(process.env.PORT) || 3000;
 const ROOT = __dirname;
@@ -809,12 +810,29 @@ const server = http.createServer((request, response) => {
       .then(() => {
         const tasks = readStoreValue("tasks");
         const completions = readStoreValue("completions");
-        return buildSubmissionAuditRows(tasks, completions);
+        const users = readStoreValue("users");
+        return {
+          reportRows: buildSubmissionAuditRows(tasks, completions, users),
+          detailsPayload: { tasks, completions, users },
+        };
       })
-      .then((rows) => rewriteSubmissionReport(ROOT, rows))
-      .then((result) => {
+      .then(({ reportRows, detailsPayload }) =>
+        Promise.all([
+          rewriteSubmissionReport(ROOT, reportRows),
+          rewriteSubmittedTaskDetailsSheet(ROOT, detailsPayload),
+        ])
+      )
+      .then(([reportResult, detailsResult]) => {
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-        response.end(JSON.stringify(result));
+        response.end(
+          JSON.stringify({
+            ...reportResult,
+            detailsRowCount: detailsResult?.rowCount ?? 0,
+            detailsSheetTitle: detailsResult?.sheetTitle || "",
+            detailsSpreadsheetUrl: detailsResult?.spreadsheetUrl || "",
+            detailsSkipped: Boolean(detailsResult?.skipped),
+          })
+        );
       })
       .catch((error) => {
         response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
