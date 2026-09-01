@@ -45,7 +45,6 @@ const STANDARD_TASK_TITLES = [
   "Greet customers",
   "Seat the customer if other than carpet.",
   "Serve water both room temperature and cold.",
-  "Take input of customer requirement by google form on T.V",
 ];
 
 function normalizePersonName(value) {
