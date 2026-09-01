@@ -1944,7 +1944,8 @@ function setCurrentView(view) {
 
 
 function allowedView(view) {
-  if (view === "buddy") {
+  const isPcUser = isPcMonitorUser(state.activeUser);
+  if (view === "buddy" && !isPcUser) {
     return "buddy";
   }
   if (view === "contacts") {
@@ -1953,10 +1954,10 @@ function allowedView(view) {
   if (view === "users" && canManageUsers(state.activeUser)) {
     return "users";
   }
-  if (view === "approvals" && canMonitorChecklists(state.activeUser)) {
+  if (view === "approvals" && !isPcUser && canMonitorChecklists(state.activeUser)) {
     return "approvals";
   }
-  if (view === "compliance" && canMonitorChecklists(state.activeUser)) {
+  if (view === "compliance" && !isPcUser && canMonitorChecklists(state.activeUser)) {
     return "compliance";
   }
   return "home";

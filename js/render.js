@@ -2053,6 +2053,7 @@ function createComplianceDayCard(day) {
 
 
 function renderSidebarVisibility() {
+  const isPcUser = isPcMonitorUser(state.activeUser);
   const usersLink = document.querySelector('.sidebar-link[data-view="users"]');
   if (usersLink) {
     usersLink.classList.toggle("hidden", !canManageUsers(state.activeUser));
@@ -2060,12 +2061,17 @@ function renderSidebarVisibility() {
 
   const approvalsLink = document.querySelector('.sidebar-link[data-view="approvals"]');
   if (approvalsLink) {
-    approvalsLink.classList.toggle("hidden", !canMonitorChecklists(state.activeUser));
+    approvalsLink.classList.toggle("hidden", isPcUser || !canMonitorChecklists(state.activeUser));
   }
 
   const complianceLink = document.querySelector('.sidebar-link[data-view="compliance"]');
   if (complianceLink) {
-    complianceLink.classList.toggle("hidden", !canMonitorChecklists(state.activeUser));
+    complianceLink.classList.toggle("hidden", isPcUser || !canMonitorChecklists(state.activeUser));
+  }
+
+  const buddyLink = document.querySelector('.sidebar-link[data-view="buddy"]');
+  if (buddyLink) {
+    buddyLink.classList.toggle("hidden", isPcUser);
   }
 }
 
