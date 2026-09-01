@@ -383,7 +383,7 @@ function handleAssignTask(event) {
 }
 
 
-function handleChecklistSubmit(event) {
+async function handleChecklistSubmit(event) {
   event.preventDefault();
 
   if (!state.activeChecklistTask) {
@@ -392,27 +392,27 @@ function handleChecklistSubmit(event) {
   }
 
   if (isPantryTask(state.activeChecklistTask)) {
-    handlePantryChecklistSubmit();
+    await handlePantryChecklistSubmit();
     return;
   }
 
   if (isGeneratorChecklistTask(state.activeChecklistTask)) {
-    handleGeneratorChecklistSubmit();
+    await handleGeneratorChecklistSubmit();
     return;
   }
 
   if (isCashHandlingChecklistTask(state.activeChecklistTask)) {
-    handleCashHandlingChecklistSubmit();
+    await handleCashHandlingChecklistSubmit();
     return;
   }
 
   if (isMeterReadingChecklistTask(state.activeChecklistTask)) {
-    handleMeterReadingChecklistSubmit();
+    await handleMeterReadingChecklistSubmit();
     return;
   }
 
   if (isEarthingCleaningTask(state.activeChecklistTask)) {
-    handleEarthingCleaningChecklistSubmit();
+    await handleEarthingCleaningChecklistSubmit();
     return;
   }
 
@@ -441,7 +441,13 @@ function handleChecklistSubmit(event) {
     return;
   }
 
-  const responses = collectChecklistResponses(template);
+  let responses;
+  try {
+    responses = await collectChecklistResponses(template);
+  } catch (error) {
+    setStatusMessage(elements.checklistMessage, error.message || "Could not upload the attachment.", "error");
+    return;
+  }
 
   const fuelValidation = validateFuelChecklistSubmission(state.activeChecklistTask, responses);
   if (!fuelValidation.ok) {
@@ -625,7 +631,7 @@ function handleVisitConfirmChange(visitNumber) {
 }
 
 
-function handleGeneratorChecklistSubmit() {
+async function handleGeneratorChecklistSubmit() {
   const task = state.activeChecklistTask;
   const generatorUnit = state.activeGeneratorUnit;
 
@@ -635,7 +641,13 @@ function handleGeneratorChecklistSubmit() {
   }
 
   const template = buildGeneratorChecklistTemplate(generatorUnit);
-  const responses = collectChecklistResponses(template);
+  let responses;
+  try {
+    responses = await collectChecklistResponses(template);
+  } catch (error) {
+    setStatusMessage(elements.checklistMessage, error.message || "Could not upload the attachment.", "error");
+    return;
+  }
   const submittedAt = new Date().toISOString();
 
   state.completions[getGeneratorCompletionKey(task, generatorUnit)] = {
@@ -692,7 +704,7 @@ function handleGeneratorChecklistSubmit() {
 }
 
 
-function handleCashHandlingChecklistSubmit() {
+async function handleCashHandlingChecklistSubmit() {
   const task = state.activeChecklistTask;
   const shift = state.activeCashHandlingShift;
 
@@ -702,7 +714,13 @@ function handleCashHandlingChecklistSubmit() {
   }
 
   const template = buildCashHandlingChecklistTemplate(shift);
-  const responses = collectChecklistResponses(template);
+  let responses;
+  try {
+    responses = await collectChecklistResponses(template);
+  } catch (error) {
+    setStatusMessage(elements.checklistMessage, error.message || "Could not upload the attachment.", "error");
+    return;
+  }
   const denominations = collectCashDenominationRows();
   const coins = collectCashCoinRows();
   const coinsAmount = coins.reduce((sum, row) => sum + row.amount, 0);
@@ -767,7 +785,7 @@ function handleCashHandlingChecklistSubmit() {
 }
 
 
-function handleMeterReadingChecklistSubmit() {
+async function handleMeterReadingChecklistSubmit() {
   const task = state.activeChecklistTask;
   const location = state.activeMeterReadingLocation;
 
@@ -777,7 +795,13 @@ function handleMeterReadingChecklistSubmit() {
   }
 
   const template = buildMeterReadingChecklistTemplate(location);
-  const responses = collectChecklistResponses(template);
+  let responses;
+  try {
+    responses = await collectChecklistResponses(template);
+  } catch (error) {
+    setStatusMessage(elements.checklistMessage, error.message || "Could not upload the attachment.", "error");
+    return;
+  }
   const submittedAt = new Date().toISOString();
 
   state.completions[getMeterReadingCompletionKey(task, location)] = {
@@ -834,7 +858,7 @@ function handleMeterReadingChecklistSubmit() {
 }
 
 
-function handleEarthingCleaningChecklistSubmit() {
+async function handleEarthingCleaningChecklistSubmit() {
   const task = state.activeChecklistTask;
   const location = state.activeEarthingCleaningLocation;
 
@@ -844,7 +868,13 @@ function handleEarthingCleaningChecklistSubmit() {
   }
 
   const template = buildEarthingCleaningChecklistTemplate(location);
-  const responses = collectChecklistResponses(template);
+  let responses;
+  try {
+    responses = await collectChecklistResponses(template);
+  } catch (error) {
+    setStatusMessage(elements.checklistMessage, error.message || "Could not upload the attachment.", "error");
+    return;
+  }
   const submittedAt = new Date().toISOString();
 
   state.completions[getEarthingCleaningCompletionKey(task, location)] = {
@@ -1497,9 +1527,43 @@ function handleNotCompletedModalBackdropClick(event) {
 }
 
 
-function handleSubmissionDetailsModalBackdropClick(event) {
+async function handleSubmissionDetailsModalBackdropClick(event) {
+  const attachmentTrigger = event.target.closest("[data-open-submission-attachment]");
+  if (attachmentTrigger) {
+    await openSavedChecklistAttachment(attachmentTrigger.getAttribute("data-open-submission-attachment"));
+    return;
+  }
   if (event.target === elements.submissionDetailsModal) {
     closeSubmissionDetailsModal();
+  }
+}
+
+
+async function openSavedChecklistAttachment(pathname) {
+  if (!pathname) {
+    return;
+  }
+
+  const viewer = window.open("", "_blank");
+  if (!viewer) {
+    setStatusMessage(elements.checklistMessage, "Allow pop-ups to view the attachment.", "error");
+    return;
+  }
+  viewer.document.title = "Loading attachment";
+
+  try {
+    const response = await fetch(`${buildApiUrl("/api/checklist-attachment")}?pathname=${encodeURIComponent(pathname)}`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error("The attachment could not be opened.");
+    }
+    const objectUrl = URL.createObjectURL(await response.blob());
+    viewer.location.replace(objectUrl);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60 * 1000);
+  } catch (error) {
+    viewer.close();
+    setStatusMessage(elements.checklistMessage, error.message || "The attachment could not be opened.", "error");
   }
 }
 
@@ -1828,9 +1892,9 @@ function getCheckboxQuestionAnswer(question) {
 }
 
 
-function collectChecklistResponses(template) {
+async function collectChecklistResponses(template) {
   const responses = {};
-  template.questions.forEach((question) => {
+  for (const question of template.questions) {
     if (question.type === "checkbox") {
       const answer = getCheckboxQuestionAnswer(question);
       responses[question.id] = answer;
@@ -1838,23 +1902,50 @@ function collectChecklistResponses(template) {
         const followUpField = document.getElementById(`question-${question.id}-followup`);
         responses[question.followUpOnNo.id] = answer === "No" ? followUpField?.value || "" : "";
       }
-      return;
+      continue;
     }
 
     const field = elements.checklistForm.elements.namedItem(question.id);
     if (!field) {
-      return;
+      continue;
     }
 
     if (question.type === "file" || question.type === "photo") {
-      responses[question.id] = [...field.files].map((file) => file.name);
-      return;
+      responses[question.id] = [];
+      for (const file of [...field.files]) {
+        responses[question.id].push(await uploadChecklistAttachment(file));
+      }
+      continue;
     }
 
     responses[question.id] = field.value;
-  });
+  }
 
   return responses;
+}
+
+
+async function uploadChecklistAttachment(file) {
+  const maxBytes = 3 * 1024 * 1024;
+  if (file.size > maxBytes) {
+    throw new Error(`"${file.name}" is larger than 3 MB. Please upload a smaller file.`);
+  }
+
+  const fileBytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  fileBytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  const response = await fetch(buildApiUrl("/api/checklist-attachments"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ name: file.name, type: file.type, data: btoa(binary) }),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `Could not upload "${file.name}".`);
+  }
+  return { name: result.name, pathname: result.pathname, contentType: result.contentType, size: result.size };
 }
 
 

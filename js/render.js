@@ -957,6 +957,10 @@ function createSubmissionValueMarkup(value) {
       return '<span class="submission-empty-value">-</span>';
     }
 
+    if (value.every(isSavedSubmissionAttachment)) {
+      return `<div class="submission-pill-list">${value.map(createSavedSubmissionAttachmentMarkup).join("")}</div>`;
+    }
+
     if (value.every((item) => item == null || ["string", "number", "boolean"].includes(typeof item))) {
       return `<div class="submission-pill-list">${value.map((item) => createSubmissionPrimitiveMarkup(item)).join("")}</div>`;
     }
@@ -964,11 +968,26 @@ function createSubmissionValueMarkup(value) {
     return createSubmissionObjectTableMarkup(value);
   }
 
+  if (isSavedSubmissionAttachment(value)) {
+    return createSavedSubmissionAttachmentMarkup(value);
+  }
+
   if (typeof value === "object") {
     return createSubmissionObjectGroupMarkup(value);
   }
 
   return createSubmissionPrimitiveMarkup(value);
+}
+
+
+function isSavedSubmissionAttachment(value) {
+  return Boolean(value && typeof value === "object" && typeof value.pathname === "string" && value.pathname.startsWith("checklist-attachments/"));
+}
+
+
+function createSavedSubmissionAttachmentMarkup(attachment) {
+  const label = attachment.name || "Open attachment";
+  return `<button type="button" class="submission-attachment-link" data-open-submission-attachment="${escapeHtml(attachment.pathname)}">${escapeHtml(label)}</button>`;
 }
 
 

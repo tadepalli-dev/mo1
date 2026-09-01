@@ -12,3 +12,5 @@ apps-script/Code.gs
 .vercel
 .env*
 .vercel.bak
+
+.env*

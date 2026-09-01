@@ -9,6 +9,7 @@
     "sync-sheets": "node scripts/sync-to-sheets.js"
   },
   "dependencies": {
+    "@vercel/blob": "^2.3.0",
     "firebase-admin": "^14.2.0"
   }
 }

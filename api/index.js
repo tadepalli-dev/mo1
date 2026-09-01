@@ -2,8 +2,10 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { DatabaseSync } = require("node:sqlite");
+const { Readable } = require("node:stream");
 const admin = require("firebase-admin");
 const { getFirestore } = require("firebase-admin/firestore");
+const { get, put } = require("@vercel/blob");
 const { appendChecklistSubmission, syncUsersSheet } = require("../lib/checklist-sheet-export");
 const { rewriteSubmissionReport } = require("../lib/submission-report-export");
 const { buildSubmissionAuditRows } = require("../lib/submission-audit");
@@ -26,6 +28,8 @@ const FIRESTORE_STORE_COLLECTION = "motrack_store";
 // hit earlier with the "tasks" store key. A collection only grows in
 // document count, never in per-document size, so that ceiling can't recur.
 const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
+const CHECKLIST_ATTACHMENT_PREFIX = "checklist-attachments/";
+const MAX_CHECKLIST_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 
 const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests"];
 const STORE_DEFAULTS = {
@@ -458,6 +462,71 @@ function parseJsonBody(request) {
   });
 }
 
+function safeAttachmentName(value) {
+  return String(value || "attachment")
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(-120);
+}
+
+function safeAttachmentMimeType(value) {
+  const mimeType = String(value || "application/octet-stream").toLowerCase();
+  return mimeType.startsWith("image/") || mimeType === "application/pdf" ? mimeType : "application/octet-stream";
+}
+
+async function handleChecklistAttachmentUpload(request, response) {
+  if (!isAuthorized(request)) {
+    sendJson(response, 401, { ok: false, error: "Unauthorized. Please sign in again." });
+    return;
+  }
+
+  const payload = await parseJsonBody(request);
+  const fileBuffer = Buffer.from(String(payload.data || ""), "base64");
+  if (!fileBuffer.length || fileBuffer.length > MAX_CHECKLIST_ATTACHMENT_BYTES) {
+    sendJson(response, 400, { ok: false, error: "Each image, PDF, or screenshot must be smaller than 3 MB." });
+    return;
+  }
+
+  const userFolder = safeAttachmentName(getSessionEmailFromToken(getBearerToken(request)) || "employee");
+  const blob = await put(`${CHECKLIST_ATTACHMENT_PREFIX}${userFolder}/${Date.now()}-${safeAttachmentName(payload.name)}`, fileBuffer, {
+    access: "private",
+    addRandomSuffix: true,
+    contentType: safeAttachmentMimeType(payload.type),
+  });
+
+  sendJson(response, 200, {
+    ok: true,
+    name: String(payload.name || "attachment"),
+    pathname: blob.pathname,
+    contentType: blob.contentType,
+    size: fileBuffer.length,
+  });
+}
+
+async function handleChecklistAttachmentDownload(request, response, pathname) {
+  if (!isAuthorized(request)) {
+    sendJson(response, 401, { ok: false, error: "Unauthorized. Please sign in again." });
+    return;
+  }
+  if (!pathname || !pathname.startsWith(CHECKLIST_ATTACHMENT_PREFIX)) {
+    sendJson(response, 400, { ok: false, error: "Invalid attachment." });
+    return;
+  }
+
+  const result = await get(pathname, { access: "private" });
+  if (!result || result.statusCode !== 200 || !result.stream) {
+    sendJson(response, 404, { ok: false, error: "Attachment not found." });
+    return;
+  }
+
+  response.status(200);
+  response.setHeader("Content-Type", result.blob.contentType || "application/octet-stream");
+  response.setHeader("Content-Disposition", "inline");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("Cache-Control", "private, no-store");
+  Readable.fromWeb(result.stream).pipe(response);
+}
+
 function sendJson(response, statusCode, payload) {
   response.status(statusCode).setHeader("Content-Type", "application/json; charset=utf-8");
   response.send(JSON.stringify(payload));
@@ -846,7 +915,7 @@ async function handler(request, response) {
       return;
     }
 
-  if (pathname === "/api/logout" && request.method === "POST") {
+    if (pathname === "/api/logout" && request.method === "POST") {
     sendJson(response, 200, { ok: true });
     return;
   }
@@ -860,6 +929,16 @@ async function handler(request, response) {
       const payload = await parseJsonBody(request);
       const result = await appendChecklistSubmission(ROOT, payload);
       sendJson(response, 200, { ok: true, ...result });
+      return;
+    }
+
+    if (pathname === "/api/checklist-attachments" && request.method === "POST") {
+      await handleChecklistAttachmentUpload(request, response);
+      return;
+    }
+
+    if (pathname === "/api/checklist-attachment" && request.method === "GET") {
+      await handleChecklistAttachmentDownload(request, response, requestUrl.searchParams.get("pathname"));
       return;
     }
 

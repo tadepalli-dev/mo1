@@ -2,7 +2,9 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { Readable } = require("node:stream");
 const { DatabaseSync } = require("node:sqlite");
+const { get, put } = require("@vercel/blob");
 const { appendChecklistSubmission, syncUsersSheet } = require("./lib/checklist-sheet-export");
 const { getServiceAccountEmail, lookupVehicleAssignment } = require("./lib/vehicle-sheet-directory");
 const { rewriteSubmissionReport } = require("./lib/submission-report-export");
@@ -14,6 +16,8 @@ const DEFAULT_PORT = Number(process.env.PORT) || 3000;
 const ROOT = __dirname;
 const SERVICE_ACCOUNT_PATH = path.join(ROOT, "service-account-key.json");
 const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
+const CHECKLIST_ATTACHMENT_PREFIX = "checklist-attachments/";
+const MAX_CHECKLIST_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 let clientFormFirestore = null;
 
 // Lazy so a missing service-account-key.json doesn't crash every other
@@ -517,6 +521,72 @@ function parseJsonBody(request, maxBytes = 1024 * 1024) {
   });
 }
 
+function safeAttachmentName(value) {
+  return String(value || "attachment")
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(-120);
+}
+
+function safeAttachmentMimeType(value) {
+  const mimeType = String(value || "application/octet-stream").toLowerCase();
+  return mimeType.startsWith("image/") || mimeType === "application/pdf" ? mimeType : "application/octet-stream";
+}
+
+async function uploadChecklistAttachment(request, response) {
+  const sessionEmail = getSessionEmail(getBearerToken(request));
+  if (!sessionEmail) {
+    response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ ok: false, error: "Unauthorized. Please sign in again." }));
+    return;
+  }
+
+  const payload = await parseJsonBody(request, 5 * 1024 * 1024);
+  const fileBuffer = Buffer.from(String(payload.data || ""), "base64");
+  if (!fileBuffer.length || fileBuffer.length > MAX_CHECKLIST_ATTACHMENT_BYTES) {
+    response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ ok: false, error: "Each image, PDF, or screenshot must be smaller than 3 MB." }));
+    return;
+  }
+
+  const blob = await put(`${CHECKLIST_ATTACHMENT_PREFIX}${safeAttachmentName(sessionEmail)}/${Date.now()}-${safeAttachmentName(payload.name)}`, fileBuffer, {
+    access: "private",
+    addRandomSuffix: true,
+    contentType: safeAttachmentMimeType(payload.type),
+  });
+  response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify({ ok: true, name: String(payload.name || "attachment"), pathname: blob.pathname, contentType: blob.contentType, size: fileBuffer.length }));
+}
+
+async function streamChecklistAttachment(request, response) {
+  const sessionEmail = getSessionEmail(getBearerToken(request));
+  const pathname = new URL(request.url, "http://localhost").searchParams.get("pathname");
+  if (!sessionEmail) {
+    response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ ok: false, error: "Unauthorized. Please sign in again." }));
+    return;
+  }
+  if (!pathname || !pathname.startsWith(CHECKLIST_ATTACHMENT_PREFIX)) {
+    response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ ok: false, error: "Invalid attachment." }));
+    return;
+  }
+
+  const result = await get(pathname, { access: "private" });
+  if (!result || result.statusCode !== 200 || !result.stream) {
+    response.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ ok: false, error: "Attachment not found." }));
+    return;
+  }
+  response.writeHead(200, {
+    "Content-Type": result.blob.contentType || "application/octet-stream",
+    "Content-Disposition": "inline",
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "private, no-store",
+  });
+  Readable.fromWeb(result.stream).pipe(response);
+}
+
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL || "moondream";
 
@@ -772,6 +842,24 @@ const server = http.createServer((request, response) => {
     deleteSession(getBearerToken(request));
     response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     response.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
+  if (request.url === "/api/checklist-attachments" && request.method === "POST") {
+    setCorsHeaders(response, request);
+    uploadChecklistAttachment(request, response).catch((error) => {
+      response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: error.message || "Could not save attachment." }));
+    });
+    return;
+  }
+
+  if (request.url.startsWith("/api/checklist-attachment") && request.method === "GET") {
+    setCorsHeaders(response, request);
+    streamChecklistAttachment(request, response).catch((error) => {
+      response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: error.message || "Could not load attachment." }));
+    });
     return;
   }
 
