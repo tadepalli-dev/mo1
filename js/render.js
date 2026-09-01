@@ -958,7 +958,7 @@ function createSubmissionValueMarkup(value) {
     }
 
     if (value.every((item) => item == null || ["string", "number", "boolean"].includes(typeof item))) {
-      return `<div class="submission-pill-list">${value.map((item) => `<span class="submission-pill">${escapeHtml(formatSubmissionPrimitive(item))}</span>`).join("")}</div>`;
+      return `<div class="submission-pill-list">${value.map((item) => createSubmissionPrimitiveMarkup(item)).join("")}</div>`;
     }
 
     return createSubmissionObjectTableMarkup(value);
@@ -968,7 +968,26 @@ function createSubmissionValueMarkup(value) {
     return createSubmissionObjectGroupMarkup(value);
   }
 
-  return `<span>${escapeHtml(formatSubmissionPrimitive(value))}</span>`;
+  return createSubmissionPrimitiveMarkup(value);
+}
+
+
+function createSubmissionPrimitiveMarkup(value) {
+  const displayValue = formatSubmissionPrimitive(value);
+  if (typeof value === "string" && isSubmissionAttachmentUrl(value)) {
+    return `<a class="submission-attachment-link" href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">Open attachment</a>`;
+  }
+  return `<span class="submission-pill">${escapeHtml(displayValue)}</span>`;
+}
+
+
+function isSubmissionAttachmentUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch (_error) {
+    return false;
+  }
 }
 
 
