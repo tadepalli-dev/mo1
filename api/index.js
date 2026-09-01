@@ -9,6 +9,7 @@ const { rewriteSubmissionReport } = require("../lib/submission-report-export");
 const { buildSubmissionAuditRows } = require("../lib/submission-audit");
 const { getServiceAccountEmail, lookupVehicleAssignment } = require("../lib/vehicle-sheet-directory");
 const { appendClientFormSubmissionRow } = require("../lib/client-form-sheet-export");
+const firestoreStore = require("../lib/firestore-store");
 
 const ROOT = process.cwd();
 const BUNDLED_DATA_DIR = path.join(ROOT, "data");
@@ -244,17 +245,16 @@ async function readStoreValueAsync(key) {
   }
 
   try {
-    const snapshot = await withTimeout(
-      firestoreDb.collection(FIRESTORE_STORE_COLLECTION).doc(key).get(),
-      4000,
+    const json = await withTimeout(
+      firestoreStore.readStoreJson(firestoreDb, FIRESTORE_STORE_COLLECTION, key),
+      8000,
       `Firestore read for ${key}`
     );
-    if (!snapshot.exists) {
+    if (json === null) {
       return readStoreValue(key);
     }
 
-    const data = snapshot.data() || {};
-    const parsed = JSON.parse(data.value);
+    const parsed = JSON.parse(json);
     return parsed ?? STORE_DEFAULTS[key];
   } catch (error) {
     console.error(`Firestore read failed for "${key}", using SQLite fallback.`, error);
@@ -271,16 +271,22 @@ async function writeStoreValueAsync(key, value) {
 
   try {
     await withTimeout(
-      firestoreDb.collection(FIRESTORE_STORE_COLLECTION).doc(key).set({
-        value: JSON.stringify(value),
-        updated_at: new Date().toISOString(),
-      }),
-      4000,
+      firestoreStore.writeStoreValue(firestoreDb, FIRESTORE_STORE_COLLECTION, key, value),
+      15000,
       `Firestore write for ${key}`
     );
+    // Keep the bundled-snapshot fallback in step with Firestore so a later
+    // Firestore outage degrades to recent data rather than deploy-time data.
+    writeStoreValue(key, value);
+    return true;
   } catch (error) {
+    // This fallback writes to /tmp on Vercel, which is per-instance and
+    // wiped between cold starts — it keeps the current request working but
+    // the data is effectively lost, so the caller reports it rather than
+    // answering a plain "ok".
     console.error(`Firestore write failed for "${key}", using SQLite fallback.`, error);
     writeStoreValue(key, value);
+    return false;
   }
 }
 
@@ -734,8 +740,12 @@ async function handleStoreRoute(request, response, key) {
       if (key === "users") {
         payload = await preserveExistingPasswordsAsync(payload);
       }
-      await writeStoreValueAsync(key, payload);
-      sendJson(response, 200, { ok: true });
+      const persisted = await writeStoreValueAsync(key, payload);
+      sendJson(response, 200, {
+        ok: true,
+        persisted,
+        ...(persisted ? {} : { warning: `"${key}" could not be saved to Firestore and will not survive a restart.` }),
+      });
     } catch (error) {
       sendJson(response, 400, { error: "Invalid JSON body" });
     }

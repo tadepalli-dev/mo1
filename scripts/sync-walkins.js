@@ -17,9 +17,17 @@ const { DatabaseSync } = require("node:sqlite");
 const admin = require("firebase-admin");
 const { getFirestore } = require("firebase-admin/firestore");
 
+const firestoreStore = require("../lib/firestore-store");
+
 const DRY_RUN = process.argv.includes("--dry-run");
 const DB_PATH = path.join(__dirname, "..", "data", "motrack.db");
 const SERVICE_ACCOUNT_PATH = path.join(__dirname, "..", "service-account-key.json");
+// The hosted app (api/index.js) reads and writes its state here. This script
+// used to write only to the local SQLite file, which the deployed app can
+// only see through a fresh git commit + redeploy — so walk-ins handed over
+// after the last deploy never got a Customer/Deal ID in the hosted
+// dashboard, while localhost showed them fine.
+const FIRESTORE_STORE_COLLECTION = "motrack_store";
 
 // The same 9 tasks already seeded as generic daily recurring tasks for every
 // salesman — this is the standard per-customer sales-floor checklist.
@@ -75,8 +83,33 @@ async function main() {
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
   );
 
-  const users = JSON.parse(getStore.get("users").value);
-  const tasks = JSON.parse(getStore.get("tasks").value || "[]");
+  // Firestore is the hosted app's source of truth, so it — not the local
+  // SQLite copy — is the base to append onto. Reading SQLite instead would
+  // clobber anything created through the hosted dashboard since the last
+  // deploy the moment this script wrote back.
+  const missingFromFirestore = new Set();
+  const readStore = async (key, fallbackValue) => {
+    const local = getStore.get(key);
+    const localValue = local ? JSON.parse(local.value || "null") : null;
+    try {
+      const remote = await firestoreStore.readStoreValue(
+        firestore,
+        FIRESTORE_STORE_COLLECTION,
+        key,
+        null
+      );
+      if (remote !== null) {
+        return remote;
+      }
+      missingFromFirestore.add(key);
+    } catch (error) {
+      console.warn(`Firestore read failed for "${key}", using local SQLite copy.`, error.message);
+    }
+    return localValue ?? fallbackValue;
+  };
+
+  const users = await readStore("users", []);
+  const tasks = await readStore("tasks", []);
 
   const salesmenByNormalizedName = new Map();
   users
@@ -190,14 +223,44 @@ async function main() {
     return;
   }
 
-  if (!newTasks.length) {
+  // A quiet day still has to seed Firestore the first time, otherwise the
+  // hosted app keeps reading the SQLite snapshot frozen at the last deploy
+  // and no walk-in ever gets a Customer/Deal ID there.
+  const needsFirestoreSeed = missingFromFirestore.has("tasks");
+  if (!newTasks.length && !needsFirestoreSeed) {
     console.log("\nNothing to write.");
     return;
   }
+  if (needsFirestoreSeed) {
+    console.log(`\n"tasks" is not in Firestore yet — seeding it with all ${tasks.length} local task(s).`);
+  }
 
   const updatedTasks = [...newTasks, ...tasks];
+
+  // Firestore first: it's what the hosted dashboard actually reads, so a
+  // failure here has to be loud (non-zero exit) instead of leaving the local
+  // file ahead of production again.
+  const result = await firestoreStore.writeStoreValue(
+    firestore,
+    FIRESTORE_STORE_COLLECTION,
+    "tasks",
+    updatedTasks
+  );
+  console.log(
+    `\nWrote ${newTasks.length} new task(s) to Firestore (${(result.bytes / 1024).toFixed(0)} KB` +
+      `${result.chunkCount ? `, ${result.chunkCount} chunks` : ""}).`
+  );
+
   setStore.run("tasks", JSON.stringify(updatedTasks), new Date().toISOString());
-  console.log(`\nWrote ${newTasks.length} new task(s) to data/motrack.db.`);
+  console.log(`Mirrored the same ${updatedTasks.length} task(s) to data/motrack.db.`);
+
+  // Tasks are matched to a salesman by assigneeEmail, so the hosted app needs
+  // the same roster this script matched against. Seeded only when absent —
+  // once Firestore holds it, the hosted dashboard owns it.
+  if (missingFromFirestore.has("users")) {
+    await firestoreStore.writeStoreValue(firestore, FIRESTORE_STORE_COLLECTION, "users", users);
+    console.log(`Seeded "users" in Firestore with ${users.length} user(s).`);
+  }
 }
 
 main()
