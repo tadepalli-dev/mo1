@@ -5,6 +5,7 @@ const crypto = require("crypto");
 const { Readable } = require("node:stream");
 const { DatabaseSync } = require("node:sqlite");
 const { get, put } = require("@vercel/blob");
+const { buildChecklistAttachmentUrl, hasValidAttachmentSignature, isChecklistAttachmentPath } = require("./lib/checklist-attachment-links");
 const { appendChecklistSubmission, syncUsersSheet } = require("./lib/checklist-sheet-export");
 const { getServiceAccountEmail, lookupVehicleAssignment } = require("./lib/vehicle-sheet-directory");
 const { rewriteSubmissionReport } = require("./lib/submission-report-export");
@@ -16,7 +17,6 @@ const DEFAULT_PORT = Number(process.env.PORT) || 3000;
 const ROOT = __dirname;
 const SERVICE_ACCOUNT_PATH = path.join(ROOT, "service-account-key.json");
 const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
-const CHECKLIST_ATTACHMENT_PREFIX = "checklist-attachments/";
 const MAX_CHECKLIST_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 let clientFormFirestore = null;
 
@@ -549,7 +549,7 @@ async function uploadChecklistAttachment(request, response) {
     return;
   }
 
-  const blob = await put(`${CHECKLIST_ATTACHMENT_PREFIX}${safeAttachmentName(sessionEmail)}/${Date.now()}-${safeAttachmentName(payload.name)}`, fileBuffer, {
+  const blob = await put(`checklist-attachments/${safeAttachmentName(sessionEmail)}/${Date.now()}-${safeAttachmentName(payload.name)}`, fileBuffer, {
     access: "private",
     addRandomSuffix: true,
     contentType: safeAttachmentMimeType(payload.type),
@@ -560,13 +560,15 @@ async function uploadChecklistAttachment(request, response) {
 
 async function streamChecklistAttachment(request, response) {
   const sessionEmail = getSessionEmail(getBearerToken(request));
-  const pathname = new URL(request.url, "http://localhost").searchParams.get("pathname");
-  if (!sessionEmail) {
+  const requestUrl = new URL(request.url, "http://localhost");
+  const pathname = requestUrl.searchParams.get("pathname");
+  const hasSignedSheetLink = hasValidAttachmentSignature(pathname, requestUrl.searchParams.get("signature"), process.env.BLOB_READ_WRITE_TOKEN);
+  if (!sessionEmail && !hasSignedSheetLink) {
     response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
     response.end(JSON.stringify({ ok: false, error: "Unauthorized. Please sign in again." }));
     return;
   }
-  if (!pathname || !pathname.startsWith(CHECKLIST_ATTACHMENT_PREFIX)) {
+  if (!isChecklistAttachmentPath(pathname)) {
     response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
     response.end(JSON.stringify({ ok: false, error: "Invalid attachment." }));
     return;
@@ -907,7 +909,10 @@ const server = http.createServer((request, response) => {
       .then(({ reportRows, detailsPayload }) =>
         Promise.all([
           rewriteSubmissionReport(ROOT, reportRows),
-          rewriteSubmittedTaskDetailsSheet(ROOT, detailsPayload),
+          rewriteSubmittedTaskDetailsSheet(ROOT, detailsPayload, {
+            attachmentUrlBuilder: (attachmentPath) =>
+              buildChecklistAttachmentUrl(attachmentPath, process.env.BLOB_READ_WRITE_TOKEN, `http://localhost:${DEFAULT_PORT}`),
+          }),
         ])
       )
       .then(([reportResult, detailsResult]) => {

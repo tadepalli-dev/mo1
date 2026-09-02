@@ -539,12 +539,20 @@ function exportChecklistSubmissionToSheet(task, responses, submittedAt) {
 // this browser posts, so every sync reflects the currently-deployed logic
 // no matter how stale this particular tab is.
 function syncSubmissionReport() {
-  fetch(buildApiUrl("/api/submission-report-sync"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-  }).catch((error) => {
-    console.error("Could not sync the submission report.", error);
-  });
+  waitForCompletionsPersistence()
+    .catch(() => {
+      // The persistence helper has already reported the save error. Still
+      // attempt a sync so a later retry can export the server's latest state.
+    })
+    .then(() =>
+      fetch(buildApiUrl("/api/submission-report-sync"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+      })
+    )
+    .catch((error) => {
+      console.error("Could not sync the submission report.", error);
+    });
 }
 
 

@@ -6,6 +6,7 @@ const admin = require("firebase-admin");
 const { getFirestore } = require("firebase-admin/firestore");
 const firestoreStore = require("../lib/firestore-store");
 const { rewriteSubmittedTaskDetailsSheet } = require("../lib/submitted-task-details-export");
+const { buildChecklistAttachmentUrl } = require("../lib/checklist-attachment-links");
 
 const ROOT = path.join(__dirname, "..");
 const STORE_COLLECTION = "motrack_store";
@@ -18,7 +19,14 @@ async function main() {
     ["tasks", "completions", "users"].map((key) => firestoreStore.readStoreValue(firestore, STORE_COLLECTION, key, key === "completions" ? {} : []))
   );
 
-  const result = await rewriteSubmittedTaskDetailsSheet(ROOT, { tasks, completions, users });
+  const result = await rewriteSubmittedTaskDetailsSheet(
+    ROOT,
+    { tasks, completions, users },
+    {
+      attachmentUrlBuilder: (attachmentPath) =>
+        buildChecklistAttachmentUrl(attachmentPath, process.env.BLOB_READ_WRITE_TOKEN),
+    }
+  );
   console.log(`Wrote ${result.rowCount} detailed submission rows to ${result.sheetTitle}.`);
 }
 

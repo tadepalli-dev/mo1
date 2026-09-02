@@ -694,8 +694,10 @@ async function bootstrapState() {
 }
 
 
+let pendingCompletionsPersistence = Promise.resolve();
+
 function persistCollection(key, value) {
-  fetch(buildApiUrl(`/api/store/${key}`), {
+  return fetch(buildApiUrl(`/api/store/${key}`), {
     method: "PUT",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(value),
@@ -874,7 +876,14 @@ function saveTasks() {
 
 function saveCompletions() {
   localStorage.setItem(STORAGE_KEYS.completions, JSON.stringify(state.completions));
-  persistCollection("completions", state.completions);
+  // The Sheets export waits for this promise, preventing a race where the
+  // report reads Firestore before the just-submitted checklist is stored.
+  pendingCompletionsPersistence = persistCollection("completions", state.completions);
+  return pendingCompletionsPersistence;
+}
+
+function waitForCompletionsPersistence() {
+  return pendingCompletionsPersistence;
 }
 
 

@@ -6,6 +6,13 @@ const { Readable } = require("node:stream");
 const admin = require("firebase-admin");
 const { getFirestore } = require("firebase-admin/firestore");
 const { get, put } = require("@vercel/blob");
+const { rewriteSubmittedTaskDetailsSheet } = require("../lib/submitted-task-details-export");
+const {
+  CHECKLIST_ATTACHMENT_PREFIX,
+  buildChecklistAttachmentUrl,
+  hasValidAttachmentSignature,
+  isChecklistAttachmentPath,
+} = require("../lib/checklist-attachment-links");
 const { appendChecklistSubmission, syncUsersSheet } = require("../lib/checklist-sheet-export");
 const { rewriteSubmissionReport } = require("../lib/submission-report-export");
 const { buildSubmissionAuditRows } = require("../lib/submission-audit");
@@ -28,7 +35,6 @@ const FIRESTORE_STORE_COLLECTION = "motrack_store";
 // hit earlier with the "tasks" store key. A collection only grows in
 // document count, never in per-document size, so that ceiling can't recur.
 const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
-const CHECKLIST_ATTACHMENT_PREFIX = "checklist-attachments/";
 const MAX_CHECKLIST_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 
 const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests"];
@@ -503,12 +509,13 @@ async function handleChecklistAttachmentUpload(request, response) {
   });
 }
 
-async function handleChecklistAttachmentDownload(request, response, pathname) {
-  if (!isAuthorized(request)) {
+async function handleChecklistAttachmentDownload(request, response, pathname, signature) {
+  const hasSignedSheetLink = hasValidAttachmentSignature(pathname, signature, process.env.BLOB_READ_WRITE_TOKEN);
+  if (!isAuthorized(request) && !hasSignedSheetLink) {
     sendJson(response, 401, { ok: false, error: "Unauthorized. Please sign in again." });
     return;
   }
-  if (!pathname || !pathname.startsWith(CHECKLIST_ATTACHMENT_PREFIX)) {
+  if (!isChecklistAttachmentPath(pathname)) {
     sendJson(response, 400, { ok: false, error: "Invalid attachment." });
     return;
   }
@@ -938,7 +945,7 @@ async function handler(request, response) {
     }
 
     if (pathname === "/api/checklist-attachment" && request.method === "GET") {
-      await handleChecklistAttachmentDownload(request, response, requestUrl.searchParams.get("pathname"));
+      await handleChecklistAttachmentDownload(request, response, requestUrl.searchParams.get("pathname"), requestUrl.searchParams.get("signature"));
       return;
     }
 
@@ -964,13 +971,25 @@ async function handler(request, response) {
         // Rows are computed here from the store's own data, not trusted from
         // the client — any browser (old build or new) can trigger a sync,
         // but the sheet always reflects whatever logic is actually deployed.
-        const [tasks, completions] = await Promise.all([
+        const [tasks, completions, users] = await Promise.all([
           readStoreValueAsync("tasks"),
           readStoreValueAsync("completions"),
+          readStoreValueAsync("users"),
         ]);
         const rows = buildSubmissionAuditRows(tasks, completions);
-        const result = await rewriteSubmissionReport(ROOT, rows);
-        sendJson(response, 200, result);
+        const attachmentUrlBuilder = (attachmentPath) =>
+          buildChecklistAttachmentUrl(attachmentPath, process.env.BLOB_READ_WRITE_TOKEN);
+        const [reportResult, detailsResult] = await Promise.all([
+          rewriteSubmissionReport(ROOT, rows),
+          rewriteSubmittedTaskDetailsSheet(ROOT, { tasks, completions, users }, { attachmentUrlBuilder }),
+        ]);
+        sendJson(response, 200, {
+          ...reportResult,
+          detailsRowCount: detailsResult?.rowCount ?? 0,
+          detailsSheetTitle: detailsResult?.sheetTitle || "",
+          detailsSpreadsheetUrl: detailsResult?.spreadsheetUrl || "",
+          detailsSkipped: Boolean(detailsResult?.skipped),
+        });
       } catch (error) {
         sendJson(response, 500, { ok: false, error: error.message || "Could not sync the submission report." });
       }
