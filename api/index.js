@@ -36,6 +36,7 @@ const FIRESTORE_STORE_COLLECTION = "motrack_store";
 // document count, never in per-document size, so that ceiling can't recur.
 const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
 const MAX_CHECKLIST_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+const RETIRED_LOGIN_EMAILS = new Set(["ups021980@gmail.com"]);
 
 const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests"];
 const STORE_DEFAULTS = {
@@ -434,7 +435,7 @@ function getSessionEmailFromToken(token) {
 
     const expiresAt = Number(payloadParts[payloadParts.length - 1]);
     const email = payloadParts.slice(0, -1).join(".");
-    if (!email || Number.isNaN(expiresAt) || expiresAt < Date.now()) {
+    if (!email || RETIRED_LOGIN_EMAILS.has(email) || Number.isNaN(expiresAt) || expiresAt < Date.now()) {
       return null;
     }
 

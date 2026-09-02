@@ -1991,6 +1991,12 @@ function setHomeDefaults() {
 function restoreSession() {
   const token = getAuthToken();
   const savedEmail = localStorage.getItem(STORAGE_KEYS.session);
+  if (String(savedEmail || "").toLowerCase() === "ups021980@gmail.com") {
+    localStorage.removeItem(STORAGE_KEYS.session);
+    clearAuthToken();
+    toggleViews(false);
+    return;
+  }
   if (!savedEmail || !token) {
     if (!token) {
       localStorage.removeItem(STORAGE_KEYS.session);

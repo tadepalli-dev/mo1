@@ -18,6 +18,7 @@ const ROOT = __dirname;
 const SERVICE_ACCOUNT_PATH = path.join(ROOT, "service-account-key.json");
 const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
 const MAX_CHECKLIST_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+const RETIRED_LOGIN_EMAILS = new Set(["ups021980@gmail.com"]);
 let clientFormFirestore = null;
 
 // Lazy so a missing service-account-key.json doesn't crash every other
@@ -108,6 +109,10 @@ function getSessionEmail(token) {
   }
   if (new Date(row.expires_at).getTime() < Date.now()) {
     deleteSessionStatement.run(token);
+    return null;
+  }
+  if (RETIRED_LOGIN_EMAILS.has(String(row.email || "").toLowerCase())) {
+    deleteSession(token);
     return null;
   }
   return row.email;
