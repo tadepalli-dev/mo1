@@ -1878,6 +1878,14 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.checklist-file-list__actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.checklist-file-list__view,
 .checklist-file-list__remove {
   flex-shrink: 0;
   border: 0;
@@ -1889,6 +1897,11 @@ textarea {
   cursor: pointer;
 }
 
+.checklist-file-list__view {
+  color: var(--accent-dark);
+}
+
+.checklist-file-list__view:hover,
 .checklist-file-list__remove:hover {
   text-decoration: underline;
 }

@@ -2449,6 +2449,28 @@ function attachRemovableFileList(field, wrapper) {
       name.textContent = file.name;
       item.append(name);
 
+      const actions = document.createElement("div");
+      actions.className = "checklist-file-list__actions";
+
+      const viewButton = document.createElement("button");
+      viewButton.type = "button";
+      viewButton.className = "checklist-file-list__view";
+      viewButton.textContent = "View";
+      viewButton.setAttribute("aria-label", `View ${file.name}`);
+      viewButton.addEventListener("click", () => {
+        const previewUrl = URL.createObjectURL(file);
+        const previewWindow = window.open(previewUrl, "_blank");
+        if (!previewWindow) {
+          URL.revokeObjectURL(previewUrl);
+          return;
+        }
+        previewWindow.opener = null;
+        // The new tab has received the file, so release this local preview
+        // URL shortly afterwards instead of retaining it for the whole form.
+        setTimeout(() => URL.revokeObjectURL(previewUrl), 60 * 1000);
+      });
+      actions.append(viewButton);
+
       const removeButton = document.createElement("button");
       removeButton.type = "button";
       removeButton.className = "checklist-file-list__remove";
@@ -2460,7 +2482,8 @@ function attachRemovableFileList(field, wrapper) {
         field.files = dataTransfer.files;
         renderList();
       });
-      item.append(removeButton);
+      actions.append(removeButton);
+      item.append(actions);
 
       list.append(item);
     });
