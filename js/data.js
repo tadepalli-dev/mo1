@@ -27,7 +27,7 @@ const INITIAL_USERS = [
   { name: "Munish", email: "munish@modesigns.in", role: "Data Analytics", designation: "MIS & Data Analytics", code: "-", dayOff: "-" },
   { name: "SAROJ KUMAR DAS", email: "modesignssaroj.das@gmail.com", role: "salesman", designation: "salesmanager", code: "ASD", dayOff: "-" },
   { name: "Kajal Kumari", email: "kajal@modesigns.in", role: "employee", designation: "CRM", code: "-", dayOff: "-" },
-  { name: "Umesh Partap singh", email: "ups021980@gmail.com", role: "salesman", designation: "salesmanager", code: "UMDP", dayOff: "-" },
+  { name: "Umesh Partap singh", email: "modesignsumesh@gmail.com", role: "salesman", designation: "salesmanager", code: "UMDP", dayOff: "-" },
   { name: "Ruchi", email: "ruchi@modesigns.in", role: "employee", designation: "CRM", code: "-", dayOff: "-" },
   { name: "Satendar kumar", email: "satendar.mospace@gmail.com", role: "installer", designation: "-", code: "-", dayOff: "Sunday" },
   { name: "Mayuri", email: "mayuri@modesigns.in", role: "employee", designation: "CRM", code: "-", dayOff: "-" },
