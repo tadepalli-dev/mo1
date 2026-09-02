@@ -22,7 +22,11 @@ function getInitialView() {
 
 function getApiBaseUrl() {
   const override = localStorage.getItem("motrack-api-base");
-  if (override && override.trim()) {
+  // A development override can remain in a browser after localhost testing.
+  // Production must always call its own /api routes, otherwise the login page
+  // appears offline even while the deployed API is healthy.
+  const isLocalDevelopment = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  if (isLocalDevelopment && override && override.trim()) {
     return override.trim().replace(/\/+$/, "");
   }
 
