@@ -54,7 +54,135 @@ function renderHomeDashboard() {
   renderKamalFuelRequestsPanel();
   renderFuelApprovalPanel();
   renderArunApprovalPanel();
+  renderVehicleWorkflowPanel();
   renderBuddyCoverageBanner();
+}
+
+
+function renderVehicleWorkflowPanel() {
+  if (!elements.vehicleChangeSection || !state.activeUser) {
+    return;
+  }
+
+  const user = state.activeUser;
+  const email = String(user.email || "").toLowerCase();
+  const requests = Array.isArray(state.vehicleChangeRequests) ? state.vehicleChangeRequests : [];
+  const ownRequests = requests
+    .filter((entry) => String(entry.employeeEmail || "").toLowerCase() === email)
+    .sort((left, right) => new Date(right.requestedAt) - new Date(left.requestedAt));
+  const pendingHr = requests.filter((entry) => entry.status === "pending_hr");
+  const approvedForCashier = requests.filter((entry) => entry.status === "approved_for_cashier");
+  const isHr = isVehicleHrApprover(user);
+  const isCashier = isVehicleCashier(user);
+
+  elements.vehicleChangeSection.classList.toggle("hidden", !isHr && !isCashier && !user);
+  if (!isHr && !isCashier) {
+    elements.vehicleWorkflowTitle.textContent = "Request a vehicle change";
+    elements.vehicleWorkflowMeta.textContent = "Your request goes to HR first. The cashier allots a vehicle after approval.";
+    const hasPending = ownRequests.some((entry) => entry.status === "pending_hr");
+    elements.vehicleWorkflowBoard.innerHTML = `
+      <form class="vehicle-request-form" data-vehicle-form="request">
+        <label class="toolbar-field toolbar-field--full">
+          <span>Reason for changing vehicle</span>
+          <textarea name="reason" rows="3" placeholder="Explain why you need a vehicle change" required ${hasPending ? "disabled" : ""}></textarea>
+        </label>
+        <button type="submit" class="button button--primary" ${hasPending ? "disabled" : ""}>${hasPending ? "Request sent to HR" : "Send request to HR"}</button>
+      </form>
+      ${renderVehicleRequestHistory(ownRequests)}
+    `;
+    return;
+  }
+
+  if (isHr && !isCashier) {
+    elements.vehicleWorkflowTitle.textContent = "Vehicle-change requests";
+    elements.vehicleWorkflowMeta.textContent = `${pendingHr.length} request${pendingHr.length === 1 ? "" : "s"} awaiting HR approval`;
+    elements.vehicleWorkflowBoard.innerHTML = pendingHr.length
+      ? pendingHr.map((entry) => renderHrVehicleRequestCard(entry)).join("")
+      : '<p class="empty-state">No vehicle-change requests are waiting for HR approval.</p>';
+    return;
+  }
+
+  elements.vehicleWorkflowTitle.textContent = "Vehicle allocation desk";
+  elements.vehicleWorkflowMeta.textContent = `${state.companyVehicles.length} company vehicle${state.companyVehicles.length === 1 ? "" : "s"} · ${approvedForCashier.length} approved request${approvedForCashier.length === 1 ? "" : "s"} waiting`;
+  elements.vehicleWorkflowBoard.innerHTML = `
+    <div class="vehicle-allocation-requests">
+      <h4>Approved requests ready to allot</h4>
+      ${approvedForCashier.length
+        ? approvedForCashier.map((entry) => renderCashierVehicleRequestCard(entry)).join("")
+        : '<p class="empty-state">No HR-approved vehicle-change requests are waiting.</p>'}
+    </div>
+    <div class="vehicle-directory">
+      <div class="vehicle-directory__heading"><h4>All company vehicles</h4><span>${escapeHtml(String(state.companyVehicles.length))} listed</span></div>
+      ${renderCompanyVehicleTable()}
+      ${state.companyVehicleWarnings.length ? `<p class="message message--error">${escapeHtml(state.companyVehicleWarnings.join(" "))}</p>` : ""}
+    </div>
+  `;
+}
+
+
+function renderVehicleRequestHistory(requests) {
+  if (!requests.length) {
+    return '<p class="empty-state">You have not submitted a vehicle-change request.</p>';
+  }
+  return `<div class="vehicle-request-history"><h4>Your requests</h4>${requests.map((entry) => `
+    <article class="vehicle-request-card">
+      <div><strong>${escapeHtml(getVehicleRequestStatusLabel(entry.status))}</strong><span>${escapeHtml(formatDateTimeValue(entry.requestedAt))}</span></div>
+      <p>${escapeHtml(entry.reason || "-")}</p>
+      ${entry.allottedVehicleNumber ? `<p>Allotted: <strong>${escapeHtml(entry.allottedVehicleNumber)}</strong></p>` : ""}
+      ${entry.reviewNote ? `<p>HR note: ${escapeHtml(entry.reviewNote)}</p>` : ""}
+    </article>`).join("")}</div>`;
+}
+
+
+function renderHrVehicleRequestCard(entry) {
+  return `
+    <article class="vehicle-request-card vehicle-request-card--action">
+      <div class="vehicle-request-card__header"><div><strong>${escapeHtml(entry.employeeName)}</strong><span>${escapeHtml(entry.employeeEmail)}</span></div><span class="task-badge task-badge--alert">Awaiting HR</span></div>
+      <p>Current vehicle: ${escapeHtml(entry.currentVehicleNumber || "Not recorded")}</p>
+      <p>Reason: ${escapeHtml(entry.reason)}</p>
+      <form class="vehicle-review-form" data-vehicle-form="review" data-request-id="${escapeHtml(entry.id)}">
+        <input name="note" placeholder="HR note (optional)" />
+        <button type="submit" name="decision" value="approved" class="button button--primary">Approve for cashier</button>
+        <button type="submit" name="decision" value="rejected" class="button button--secondary">Reject</button>
+      </form>
+    </article>`;
+}
+
+
+function renderCashierVehicleRequestCard(entry) {
+  const options = state.companyVehicles.map((vehicle) => {
+    const owner = vehicle.assignedTo?.name ? ` - currently ${vehicle.assignedTo.name}` : " - unassigned";
+    return `<option value="${escapeHtml(vehicle.vehicleNumber)}">${escapeHtml(`${vehicle.vehicleNumber} (${vehicle.vehicleType})${owner}`)}</option>`;
+  }).join("");
+  return `
+    <article class="vehicle-request-card vehicle-request-card--action">
+      <div class="vehicle-request-card__header"><div><strong>${escapeHtml(entry.employeeName)}</strong><span>${escapeHtml(entry.employeeEmail)}</span></div><span class="task-badge">HR approved</span></div>
+      <p>Current vehicle: ${escapeHtml(entry.currentVehicleNumber || "Not recorded")} · Reason: ${escapeHtml(entry.reason)}</p>
+      <form class="vehicle-allot-form" data-vehicle-form="allot" data-request-id="${escapeHtml(entry.id)}">
+        <select name="vehicleNumber" required><option value="">Choose vehicle to allot</option>${options}</select>
+        <input name="note" placeholder="Cashier note (optional)" />
+        <button type="submit" class="button button--primary">Allot vehicle</button>
+      </form>
+    </article>`;
+}
+
+
+function renderCompanyVehicleTable() {
+  if (!state.companyVehicles.length) {
+    return '<p class="empty-state">Loading the company vehicle list...</p>';
+  }
+  return `<div class="vehicle-directory__table-wrap"><table class="vehicle-directory__table"><thead><tr><th>Vehicle</th><th>Type</th><th>Currently assigned to</th></tr></thead><tbody>${state.companyVehicles.map((vehicle) => `
+    <tr><td>${escapeHtml(vehicle.vehicleNumber)}</td><td>${escapeHtml(vehicle.vehicleType)}</td><td>${escapeHtml(vehicle.assignedTo?.name || "Unassigned")}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+
+function getVehicleRequestStatusLabel(status) {
+  return {
+    pending_hr: "Awaiting HR approval",
+    approved_for_cashier: "Approved - waiting for cashier",
+    rejected: "Rejected by HR",
+    allotted: "Vehicle allotted",
+  }[status] || "Request submitted";
 }
 
 

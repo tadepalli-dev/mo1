@@ -7,7 +7,11 @@ const { DatabaseSync } = require("node:sqlite");
 const { get, put } = require("@vercel/blob");
 const { buildChecklistAttachmentUrl, hasValidAttachmentSignature, isChecklistAttachmentPath } = require("./lib/checklist-attachment-links");
 const { appendChecklistSubmission, syncUsersSheet } = require("./lib/checklist-sheet-export");
-const { getServiceAccountEmail, lookupVehicleAssignment } = require("./lib/vehicle-sheet-directory");
+const {
+  getServiceAccountEmail,
+  listVehicleAssignments,
+  lookupVehicleAssignment,
+} = require("./lib/vehicle-sheet-directory");
 const { rewriteSubmissionReport } = require("./lib/submission-report-export");
 const { buildSubmissionAuditRows } = require("./lib/submission-audit");
 const { appendClientFormSubmissionRow } = require("./lib/client-form-sheet-export");
@@ -130,7 +134,7 @@ function getBearerToken(request) {
   return match ? match[1].trim() : null;
 }
 
-const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests"];
+const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests", "vehicleChangeRequests", "vehicleAllocations"];
 const STORE_DEFAULTS = {
   users: [],
   tasks: [],
@@ -140,7 +144,10 @@ const STORE_DEFAULTS = {
   pantryAlerts: [],
   liveLocations: {},
   passwordResetRequests: [],
+  vehicleChangeRequests: [],
+  vehicleAllocations: {},
 };
+const CASHIER_EMAIL = "dilip.gupta@curtainsandcarpets.com";
 
 const getStoreStatement = db.prepare("SELECT value FROM kv_store WHERE key = ?");
 const setStoreStatement = db.prepare(
@@ -172,6 +179,57 @@ function readAllStore() {
   });
   result.users = stripPasswords(result.users);
   return result;
+}
+
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getSessionUser(request) {
+  const email = getSessionEmail(getBearerToken(request));
+  if (!email) {
+    return null;
+  }
+  return readStoreValue("users").find((user) => normalizeEmail(user.email) === email) || null;
+}
+
+function isHrApprover(user) {
+  const role = String(user?.role || "").toLowerCase();
+  const designation = String(user?.designation || "").toLowerCase();
+  return role === "admin" || role === "hr" || designation.includes("hr");
+}
+
+async function getLiveVehicleDirectory() {
+  const directory = await listVehicleAssignments(ROOT);
+  const allocations = readStoreValue("vehicleAllocations");
+  const users = readStoreValue("users");
+  const usersByEmail = new Map(users.map((user) => [normalizeEmail(user.email), user]));
+  const assignedByVehicle = new Map();
+  Object.values(allocations && typeof allocations === "object" ? allocations : {}).forEach((allocation) => {
+    if (allocation?.vehicleNumber) {
+      assignedByVehicle.set(String(allocation.vehicleNumber).trim().toLowerCase(), allocation);
+    }
+  });
+
+  return {
+    warnings: directory.warnings,
+    vehicles: directory.vehicles.map((vehicle) => {
+      const allocation = assignedByVehicle.get(vehicle.vehicleNumber.toLowerCase());
+      const sourceUser = allocation
+        ? usersByEmail.get(normalizeEmail(allocation.employeeEmail))
+        : usersByEmail.get(normalizeEmail(vehicle.email));
+      return {
+        ...vehicle,
+        assignedTo: allocation
+          ? { email: allocation.employeeEmail, name: allocation.employeeName || sourceUser?.name || allocation.employeeEmail }
+          : sourceUser
+            ? { email: sourceUser.email, name: sourceUser.name }
+            : vehicle.email
+              ? { email: vehicle.email, name: vehicle.email }
+              : null,
+      };
+    }),
+  };
 }
 
 // A separate secret from user login tokens, used only by the Sheets/Looker
@@ -960,6 +1018,160 @@ const server = http.createServer((request, response) => {
     return;
   }
 
+  if (request.url === "/api/vehicle-directory" && request.method === "GET") {
+    setCorsHeaders(response, request);
+    if (!getSessionEmail(getBearerToken(request))) {
+      response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: "Unauthorized. Please sign in again." }));
+      return;
+    }
+    getLiveVehicleDirectory()
+      .then((directory) => {
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: true, ...directory }));
+      })
+      .catch((error) => {
+        response.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: false, error: error.message || "Could not load the company vehicle list." }));
+      });
+    return;
+  }
+
+  if (request.url === "/api/vehicle-change-requests" && request.method === "POST") {
+    setCorsHeaders(response, request);
+    const user = getSessionUser(request);
+    if (!user) {
+      response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: "Unauthorized. Please sign in again." }));
+      return;
+    }
+    parseJsonBody(request)
+      .then(async (payload) => {
+        const reason = String(payload.reason || "").trim();
+        if (!reason) {
+          throw new Error("Please enter a reason for the vehicle change.");
+        }
+        const requests = readStoreValue("vehicleChangeRequests");
+        if (requests.some((entry) => normalizeEmail(entry.employeeEmail) === normalizeEmail(user.email) && entry.status === "pending_hr")) {
+          const error = new Error("Your vehicle-change request is already awaiting HR approval.");
+          error.statusCode = 409;
+          throw error;
+        }
+        const allocations = readStoreValue("vehicleAllocations");
+        let currentVehicle = allocations?.[normalizeEmail(user.email)] || null;
+        if (!currentVehicle) {
+          try {
+            currentVehicle = (await lookupVehicleAssignment(ROOT, user.email)).match;
+          } catch (error) {
+            currentVehicle = null;
+          }
+        }
+        const entry = {
+          id: crypto.randomUUID(), employeeEmail: user.email, employeeName: user.name || user.email,
+          currentVehicleNumber: currentVehicle?.vehicleNumber || "", currentVehicleType: currentVehicle?.vehicleType || "",
+          reason, status: "pending_hr", requestedAt: new Date().toISOString(),
+        };
+        requests.push(entry);
+        writeStoreValue("vehicleChangeRequests", requests);
+        return entry;
+      })
+      .then((entry) => {
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: true, request: entry, persisted: true }));
+      })
+      .catch((error) => {
+        response.writeHead(error.statusCode || 400, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: false, error: error.message || "Could not create vehicle-change request." }));
+      });
+    return;
+  }
+
+  const vehicleRequestMatch = request.url.match(/^\/api\/vehicle-change-requests\/([^/]+)\/(review|allot)$/);
+  if (vehicleRequestMatch && request.method === "POST") {
+    setCorsHeaders(response, request);
+    const [, requestId, action] = vehicleRequestMatch;
+    const user = getSessionUser(request);
+    if (!user) {
+      response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: "Unauthorized. Please sign in again." }));
+      return;
+    }
+    parseJsonBody(request)
+      .then(async (payload) => {
+        const requests = readStoreValue("vehicleChangeRequests");
+        const entry = requests.find((item) => item.id === requestId);
+        if (!entry) {
+          const error = new Error("Vehicle-change request not found.");
+          error.statusCode = 404;
+          throw error;
+        }
+        if (action === "review") {
+          if (!isHrApprover(user)) {
+            const error = new Error("Only HR can review vehicle-change requests.");
+            error.statusCode = 403;
+            throw error;
+          }
+          const decision = String(payload.decision || "").toLowerCase();
+          if (!["approved", "rejected"].includes(decision) || entry.status !== "pending_hr") {
+            const error = new Error("This request cannot be reviewed now.");
+            error.statusCode = 409;
+            throw error;
+          }
+          entry.status = decision === "approved" ? "approved_for_cashier" : "rejected";
+          entry.reviewNote = String(payload.note || "").trim();
+          entry.reviewedAt = new Date().toISOString();
+          entry.reviewedByEmail = user.email;
+          entry.reviewedByName = user.name || user.email;
+          writeStoreValue("vehicleChangeRequests", requests);
+          return entry;
+        }
+        if (normalizeEmail(user.email) !== CASHIER_EMAIL) {
+          const error = new Error("Only Dilip Gupta, the cashier, can allot vehicles.");
+          error.statusCode = 403;
+          throw error;
+        }
+        if (entry.status !== "approved_for_cashier") {
+          const error = new Error("This request is not ready for vehicle allotment.");
+          error.statusCode = 409;
+          throw error;
+        }
+        const vehicleNumber = String(payload.vehicleNumber || "").trim();
+        const directory = await getLiveVehicleDirectory();
+        const vehicle = directory.vehicles.find((item) => item.vehicleNumber.toLowerCase() === vehicleNumber.toLowerCase());
+        if (!vehicle) {
+          throw new Error("The selected vehicle is not in the company vehicle list.");
+        }
+        const allocations = { ...(readStoreValue("vehicleAllocations") || {}) };
+        Object.keys(allocations).forEach((email) => {
+          if (String(allocations[email]?.vehicleNumber || "").toLowerCase() === vehicle.vehicleNumber.toLowerCase()) delete allocations[email];
+        });
+        allocations[normalizeEmail(entry.employeeEmail)] = {
+          employeeEmail: entry.employeeEmail, employeeName: entry.employeeName, vehicleNumber: vehicle.vehicleNumber,
+          vehicleType: vehicle.vehicleType, sourceLabel: "Cashier allocation", assignedAt: new Date().toISOString(),
+          assignedByEmail: user.email, assignedByName: user.name || user.email,
+        };
+        entry.status = "allotted";
+        entry.allottedVehicleNumber = vehicle.vehicleNumber;
+        entry.allottedVehicleType = vehicle.vehicleType;
+        entry.allottedAt = new Date().toISOString();
+        entry.allottedByEmail = user.email;
+        entry.allottedByName = user.name || user.email;
+        entry.cashierNote = String(payload.note || "").trim();
+        writeStoreValue("vehicleAllocations", allocations);
+        writeStoreValue("vehicleChangeRequests", requests);
+        return entry;
+      })
+      .then((entry) => {
+        response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: true, request: entry, persisted: true }));
+      })
+      .catch((error) => {
+        response.writeHead(error.statusCode || 400, { "Content-Type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ ok: false, error: error.message || "Could not update vehicle workflow." }));
+      });
+    return;
+  }
+
   if (request.url.startsWith("/api/vehicle-assignment") && request.method === "GET") {
     setCorsHeaders(response, request);
     const sessionEmail = getSessionEmail(getBearerToken(request));
@@ -969,7 +1181,8 @@ const server = http.createServer((request, response) => {
       return;
     }
 
-    lookupVehicleAssignment(ROOT, sessionEmail)
+    const allocation = readStoreValue("vehicleAllocations")?.[normalizeEmail(sessionEmail)];
+    Promise.resolve(allocation ? { match: allocation, warnings: [] } : lookupVehicleAssignment(ROOT, sessionEmail))
       .then((result) => {
         response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
         response.end(JSON.stringify({ ok: true, email: sessionEmail, ...result }));

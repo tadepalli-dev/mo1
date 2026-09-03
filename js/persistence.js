@@ -691,6 +691,9 @@ async function bootstrapState() {
   // Same reasoning as liveLocations — these are server-mediated requests,
   // not something any one browser needs to cache offline.
   state.passwordResetRequests = Array.isArray(server?.passwordResetRequests) ? server.passwordResetRequests : [];
+  state.vehicleChangeRequests = Array.isArray(server?.vehicleChangeRequests) ? server.vehicleChangeRequests : [];
+  state.vehicleAllocations =
+    server?.vehicleAllocations && typeof server.vehicleAllocations === "object" ? server.vehicleAllocations : {};
 }
 
 
@@ -773,6 +776,33 @@ async function refreshStateFromServer() {
   }
   if (Array.isArray(server.passwordResetRequests)) {
     state.passwordResetRequests = server.passwordResetRequests;
+  }
+  if (Array.isArray(server.vehicleChangeRequests)) {
+    state.vehicleChangeRequests = server.vehicleChangeRequests;
+  }
+  if (server.vehicleAllocations && typeof server.vehicleAllocations === "object") {
+    state.vehicleAllocations = server.vehicleAllocations;
+  }
+}
+
+async function loadCompanyVehicles() {
+  if (!getAuthToken()) {
+    return;
+  }
+  try {
+    const response = await fetch(buildApiUrl("/api/vehicle-directory"), { headers: authHeaders() });
+    const result = await response.json();
+    if (response.status === 401) {
+      handleUnauthorized();
+      return;
+    }
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "Could not load the company vehicle list.");
+    }
+    state.companyVehicles = Array.isArray(result.vehicles) ? result.vehicles : [];
+    state.companyVehicleWarnings = Array.isArray(result.warnings) ? result.warnings : [];
+  } catch (error) {
+    state.companyVehicleWarnings = [error.message];
   }
 }
 

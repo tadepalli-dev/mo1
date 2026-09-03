@@ -16,7 +16,11 @@ const {
 const { appendChecklistSubmission, syncUsersSheet } = require("../lib/checklist-sheet-export");
 const { rewriteSubmissionReport } = require("../lib/submission-report-export");
 const { buildSubmissionAuditRows } = require("../lib/submission-audit");
-const { getServiceAccountEmail, lookupVehicleAssignment } = require("../lib/vehicle-sheet-directory");
+const {
+  getServiceAccountEmail,
+  listVehicleAssignments,
+  lookupVehicleAssignment,
+} = require("../lib/vehicle-sheet-directory");
 const { appendClientFormSubmissionRow } = require("../lib/client-form-sheet-export");
 const firestoreStore = require("../lib/firestore-store");
 
@@ -38,7 +42,7 @@ const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
 const MAX_CHECKLIST_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 const RETIRED_LOGIN_EMAILS = new Set(["ups021980@gmail.com"]);
 
-const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests"];
+const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests", "vehicleChangeRequests", "vehicleAllocations"];
 const STORE_DEFAULTS = {
   users: [],
   tasks: [],
@@ -48,7 +52,10 @@ const STORE_DEFAULTS = {
   pantryAlerts: [],
   liveLocations: {},
   passwordResetRequests: [],
+  vehicleChangeRequests: [],
+  vehicleAllocations: {},
 };
+const CASHIER_EMAIL = "dilip.gupta@curtainsandcarpets.com";
 
 const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 const LEAVE_SHEET_ID = "1tIAHEepKuv57BHjTg_qIQgXfbzrUjhEYUv_5kfyMD0U";
@@ -779,6 +786,209 @@ function isAuthorized(request) {
   return Boolean(getSessionEmailFromToken(getBearerToken(request)));
 }
 
+function normalizeEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isHrApprover(user) {
+  const role = String(user?.role || "").toLowerCase();
+  const designation = String(user?.designation || "").toLowerCase();
+  return role === "admin" || role === "hr" || designation.includes("hr");
+}
+
+async function getSessionUser(request) {
+  const email = getSessionEmailFromToken(getBearerToken(request));
+  if (!email) {
+    return null;
+  }
+  const users = await readUsersWithPasswordsAsync();
+  return users.find((user) => normalizeEmail(user.email) === email) || null;
+}
+
+async function getLiveVehicleDirectory() {
+  const [directory, allocations, users] = await Promise.all([
+    listVehicleAssignments(ROOT),
+    readStoreValueAsync("vehicleAllocations"),
+    readUsersWithPasswordsAsync(),
+  ]);
+  const activeAllocations = allocations && typeof allocations === "object" ? allocations : {};
+  const usersByEmail = new Map(users.map((user) => [normalizeEmail(user.email), user]));
+  const assignedByVehicle = new Map();
+  Object.values(activeAllocations).forEach((allocation) => {
+    if (allocation?.vehicleNumber) {
+      assignedByVehicle.set(String(allocation.vehicleNumber).trim().toLowerCase(), allocation);
+    }
+  });
+
+  return {
+    warnings: directory.warnings,
+    vehicles: directory.vehicles.map((vehicle) => {
+      const allocation = assignedByVehicle.get(vehicle.vehicleNumber.toLowerCase());
+      const sourceUser = allocation
+        ? usersByEmail.get(normalizeEmail(allocation.employeeEmail))
+        : usersByEmail.get(normalizeEmail(vehicle.email));
+      return {
+        ...vehicle,
+        assignedTo: allocation
+          ? { email: allocation.employeeEmail, name: allocation.employeeName || sourceUser?.name || allocation.employeeEmail }
+          : sourceUser
+            ? { email: sourceUser.email, name: sourceUser.name }
+            : vehicle.email
+              ? { email: vehicle.email, name: vehicle.email }
+              : null,
+      };
+    }),
+  };
+}
+
+async function handleVehicleChangeRequestCreate(request, response) {
+  const user = await getSessionUser(request);
+  if (!user) {
+    sendJson(response, 401, { ok: false, error: "Unauthorized. Please sign in again." });
+    return;
+  }
+
+  const payload = await parseJsonBody(request);
+  const reason = String(payload.reason || "").trim();
+  if (!reason) {
+    sendJson(response, 400, { ok: false, error: "Please enter a reason for the vehicle change." });
+    return;
+  }
+
+  const requests = await readStoreValueAsync("vehicleChangeRequests");
+  const hasPendingRequest = requests.some(
+    (entry) => normalizeEmail(entry.employeeEmail) === normalizeEmail(user.email) && entry.status === "pending_hr"
+  );
+  if (hasPendingRequest) {
+    sendJson(response, 409, { ok: false, error: "Your vehicle-change request is already awaiting HR approval." });
+    return;
+  }
+
+  let currentVehicle = null;
+  try {
+    const allocations = await readStoreValueAsync("vehicleAllocations");
+    currentVehicle = allocations?.[normalizeEmail(user.email)] || (await lookupVehicleAssignment(ROOT, user.email)).match;
+  } catch (error) {
+    // A request can still be raised when the source sheet is temporarily unavailable.
+  }
+
+  const entry = {
+    id: crypto.randomUUID(),
+    employeeEmail: user.email,
+    employeeName: user.name || user.email,
+    currentVehicleNumber: currentVehicle?.vehicleNumber || "",
+    currentVehicleType: currentVehicle?.vehicleType || "",
+    reason,
+    status: "pending_hr",
+    requestedAt: new Date().toISOString(),
+  };
+  requests.push(entry);
+  const persisted = await writeStoreValueAsync("vehicleChangeRequests", requests);
+  sendJson(response, 200, { ok: true, request: entry, persisted });
+}
+
+async function handleVehicleChangeRequestReview(request, response, requestId) {
+  const reviewer = await getSessionUser(request);
+  if (!reviewer || !isHrApprover(reviewer)) {
+    sendJson(response, 403, { ok: false, error: "Only HR can review vehicle-change requests." });
+    return;
+  }
+
+  const payload = await parseJsonBody(request);
+  const decision = String(payload.decision || "").toLowerCase();
+  if (!["approved", "rejected"].includes(decision)) {
+    sendJson(response, 400, { ok: false, error: "Choose approve or reject." });
+    return;
+  }
+
+  const requests = await readStoreValueAsync("vehicleChangeRequests");
+  const entry = requests.find((item) => item.id === requestId);
+  if (!entry) {
+    sendJson(response, 404, { ok: false, error: "Vehicle-change request not found." });
+    return;
+  }
+  if (entry.status !== "pending_hr") {
+    sendJson(response, 409, { ok: false, error: "This request has already been reviewed." });
+    return;
+  }
+
+  entry.status = decision === "approved" ? "approved_for_cashier" : "rejected";
+  entry.reviewNote = String(payload.note || "").trim();
+  entry.reviewedAt = new Date().toISOString();
+  entry.reviewedByEmail = reviewer.email;
+  entry.reviewedByName = reviewer.name || reviewer.email;
+  const persisted = await writeStoreValueAsync("vehicleChangeRequests", requests);
+  sendJson(response, 200, { ok: true, request: entry, persisted });
+}
+
+async function handleVehicleChangeRequestAllot(request, response, requestId) {
+  const cashier = await getSessionUser(request);
+  if (!cashier || normalizeEmail(cashier.email) !== CASHIER_EMAIL) {
+    sendJson(response, 403, { ok: false, error: "Only Dilip Gupta, the cashier, can allot vehicles." });
+    return;
+  }
+
+  const payload = await parseJsonBody(request);
+  const requestedVehicleNumber = String(payload.vehicleNumber || "").trim();
+  if (!requestedVehicleNumber) {
+    sendJson(response, 400, { ok: false, error: "Choose a vehicle to allot." });
+    return;
+  }
+
+  const [requests, directory, allocations] = await Promise.all([
+    readStoreValueAsync("vehicleChangeRequests"),
+    getLiveVehicleDirectory(),
+    readStoreValueAsync("vehicleAllocations"),
+  ]);
+  const entry = requests.find((item) => item.id === requestId);
+  if (!entry) {
+    sendJson(response, 404, { ok: false, error: "Vehicle-change request not found." });
+    return;
+  }
+  if (entry.status !== "approved_for_cashier") {
+    sendJson(response, 409, { ok: false, error: "This request is not ready for vehicle allotment." });
+    return;
+  }
+  const vehicle = directory.vehicles.find(
+    (item) => item.vehicleNumber.toLowerCase() === requestedVehicleNumber.toLowerCase()
+  );
+  if (!vehicle) {
+    sendJson(response, 400, { ok: false, error: "The selected vehicle is not in the company vehicle list." });
+    return;
+  }
+
+  const nextAllocations = allocations && typeof allocations === "object" ? { ...allocations } : {};
+  Object.keys(nextAllocations).forEach((email) => {
+    if (String(nextAllocations[email]?.vehicleNumber || "").toLowerCase() === vehicle.vehicleNumber.toLowerCase()) {
+      delete nextAllocations[email];
+    }
+  });
+  nextAllocations[normalizeEmail(entry.employeeEmail)] = {
+    employeeEmail: entry.employeeEmail,
+    employeeName: entry.employeeName,
+    vehicleNumber: vehicle.vehicleNumber,
+    vehicleType: vehicle.vehicleType,
+    sourceLabel: "Cashier allocation",
+    assignedAt: new Date().toISOString(),
+    assignedByEmail: cashier.email,
+    assignedByName: cashier.name || cashier.email,
+  };
+
+  entry.status = "allotted";
+  entry.allottedVehicleNumber = vehicle.vehicleNumber;
+  entry.allottedVehicleType = vehicle.vehicleType;
+  entry.allottedAt = new Date().toISOString();
+  entry.allottedByEmail = cashier.email;
+  entry.allottedByName = cashier.name || cashier.email;
+  entry.cashierNote = String(payload.note || "").trim();
+
+  const [requestsPersisted, allocationsPersisted] = await Promise.all([
+    writeStoreValueAsync("vehicleChangeRequests", requests),
+    writeStoreValueAsync("vehicleAllocations", nextAllocations),
+  ]);
+  sendJson(response, 200, { ok: true, request: entry, persisted: requestsPersisted && allocationsPersisted });
+}
+
 function getRequestUrl(request) {
   const host = request.headers.host || "localhost";
   return new URL(request.url, `https://${host}`);
@@ -1005,7 +1215,11 @@ async function handler(request, response) {
 
       const sessionEmail = getSessionEmailFromToken(getBearerToken(request));
       try {
-        const result = await lookupVehicleAssignment(ROOT, sessionEmail);
+        const allocations = await readStoreValueAsync("vehicleAllocations");
+        const allocatedVehicle = allocations?.[normalizeEmail(sessionEmail)];
+        const result = allocatedVehicle
+          ? { match: allocatedVehicle, warnings: [] }
+          : await lookupVehicleAssignment(ROOT, sessionEmail);
         sendJson(response, 200, { ok: true, email: sessionEmail, ...result });
       } catch (error) {
         sendJson(response, 500, {
@@ -1013,6 +1227,39 @@ async function handler(request, response) {
           error: error.message || "Could not load vehicle assignment",
           shareWith: getServiceAccountEmail(ROOT),
         });
+      }
+      return;
+    }
+
+    if (pathname === "/api/vehicle-directory" && request.method === "GET") {
+      if (!isAuthorized(request)) {
+        sendJson(response, 401, { ok: false, error: "Unauthorized. Please sign in again." });
+        return;
+      }
+      try {
+        sendJson(response, 200, { ok: true, ...(await getLiveVehicleDirectory()) });
+      } catch (error) {
+        sendJson(response, 500, {
+          ok: false,
+          error: error.message || "Could not load the company vehicle list.",
+          shareWith: getServiceAccountEmail(ROOT),
+        });
+      }
+      return;
+    }
+
+    if (pathname === "/api/vehicle-change-requests" && request.method === "POST") {
+      await handleVehicleChangeRequestCreate(request, response);
+      return;
+    }
+
+    const vehicleRequestMatch = pathname.match(/^\/api\/vehicle-change-requests\/([^/]+)\/(review|allot)$/);
+    if (vehicleRequestMatch && request.method === "POST") {
+      const [, requestId, action] = vehicleRequestMatch;
+      if (action === "review") {
+        await handleVehicleChangeRequestReview(request, response, requestId);
+      } else {
+        await handleVehicleChangeRequestAllot(request, response, requestId);
       }
       return;
     }

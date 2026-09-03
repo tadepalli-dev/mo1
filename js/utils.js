@@ -430,6 +430,16 @@ function isAdmin(user) {
   return normalizeValue(user?.role).toLowerCase() === "admin";
 }
 
+function isVehicleHrApprover(user) {
+  const role = normalizeValue(user?.role).toLowerCase();
+  const designation = normalizeValue(user?.designation).toLowerCase();
+  return role === "admin" || role === "hr" || designation.includes("hr");
+}
+
+function isVehicleCashier(user) {
+  return String(user?.email || "").trim().toLowerCase() === "dilip.gupta@curtainsandcarpets.com";
+}
+
 
 function isPcMonitorUser(user) {
   const role = normalizeValue(user?.role).toLowerCase();

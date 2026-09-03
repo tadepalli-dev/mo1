@@ -2054,3 +2054,111 @@ textarea {
     padding: 0.9rem;
   }
 }
+
+.vehicle-workflow {
+  margin: 1.5rem 0;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.vehicle-workflow__board,
+.vehicle-allocation-requests,
+.vehicle-directory,
+.vehicle-request-history {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.vehicle-request-form,
+.vehicle-review-form,
+.vehicle-allot-form {
+  display: grid;
+  gap: 0.7rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fffdf8;
+}
+
+.vehicle-review-form,
+.vehicle-allot-form {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+}
+
+.vehicle-allot-form {
+  grid-template-columns: minmax(190px, 1fr) minmax(160px, 1fr) auto;
+}
+
+.vehicle-request-card {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+}
+
+.vehicle-request-card p {
+  margin: 0.55rem 0 0;
+  color: var(--muted);
+}
+
+.vehicle-request-card__header,
+.vehicle-request-card__header > div,
+.vehicle-directory__heading {
+  display: flex;
+  gap: 0.55rem;
+}
+
+.vehicle-request-card__header,
+.vehicle-directory__heading {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.vehicle-request-card__header > div {
+  flex-direction: column;
+}
+
+.vehicle-request-card__header span:not(.task-badge),
+.vehicle-directory__heading span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.vehicle-directory__table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+
+.vehicle-directory__table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 560px;
+}
+
+.vehicle-directory__table th,
+.vehicle-directory__table td {
+  padding: 0.75rem 0.9rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+
+.vehicle-directory__table th {
+  background: var(--ink);
+  color: #fff;
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.vehicle-directory__table tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (max-width: 760px) {
+  .vehicle-review-form,
+  .vehicle-allot-form {
+    grid-template-columns: 1fr;
+  }
+}

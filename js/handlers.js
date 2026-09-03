@@ -74,6 +74,66 @@ async function autoFillVehicleFieldsFromLoginEmail(task) {
 }
 
 
+async function handleVehicleWorkflowSubmit(event) {
+  const form = event.target.closest("form[data-vehicle-form]");
+  if (!form) {
+    return;
+  }
+  event.preventDefault();
+  const formType = form.dataset.vehicleForm;
+  const requestId = form.dataset.requestId;
+  const submitter = event.submitter;
+  const body = new FormData(form);
+  let url = "";
+  let payload = {};
+
+  if (formType === "request") {
+    url = "/api/vehicle-change-requests";
+    payload = { reason: String(body.get("reason") || "").trim() };
+  } else if (formType === "review") {
+    url = `/api/vehicle-change-requests/${encodeURIComponent(requestId)}/review`;
+    payload = {
+      decision: submitter?.value,
+      note: String(body.get("note") || "").trim(),
+    };
+  } else if (formType === "allot") {
+    url = `/api/vehicle-change-requests/${encodeURIComponent(requestId)}/allot`;
+    payload = {
+      vehicleNumber: String(body.get("vehicleNumber") || "").trim(),
+      note: String(body.get("note") || "").trim(),
+    };
+  } else {
+    return;
+  }
+
+  try {
+    const response = await fetch(buildApiUrl(url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (response.status === 401) {
+      handleUnauthorized();
+      return;
+    }
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "Could not save the vehicle workflow update.");
+    }
+    await Promise.all([refreshStateFromServer(), loadCompanyVehicles()]);
+    renderDashboard();
+  } catch (error) {
+    window.alert(error.message || "Could not save the vehicle workflow update.");
+  }
+}
+
+
+function handleVehicleWorkflowAction() {
+  // Form submission carries all vehicle workflow actions. This listener keeps
+  // the board extensible without adding document-level click handlers.
+}
+
+
 async function handleLogin(event) {
   event.preventDefault();
 
@@ -118,6 +178,7 @@ async function handleLogin(event) {
   toggleViews(true);
   setHomeDefaults();
   renderDashboard();
+  loadCompanyVehicles().then(renderDashboard);
   setStatusMessage(elements.loginMessage, `Welcome, ${result.user.name}.`, "success");
 }
 

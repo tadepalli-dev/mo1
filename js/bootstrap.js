@@ -13,6 +13,9 @@ async function initialize() {
     elements.approvalsDateInput.value = getDefaultApprovalsDateForUser(state.activeUser);
   }
   renderDashboard();
+  if (state.activeUser) {
+    loadCompanyVehicles().then(renderDashboard);
+  }
   loadSheetLeaveData();
   setInterval(loadSheetLeaveData, SHEET_LEAVE_REFRESH_MS);
   setInterval(async () => {
@@ -20,6 +23,7 @@ async function initialize() {
       return;
     }
     await refreshStateFromServer();
+    await loadCompanyVehicles();
     renderDashboard();
   }, SERVER_STATE_REFRESH_MS);
 }
@@ -37,6 +41,8 @@ function bindEvents() {
   elements.forgotPasswordModal.addEventListener("click", handleForgotPasswordModalBackdropClick);
   elements.forgotPasswordForm.addEventListener("submit", handleForgotPasswordSubmit);
   elements.passwordResetRequestsBoard.addEventListener("click", handlePasswordResetAction);
+  elements.vehicleWorkflowBoard?.addEventListener("submit", handleVehicleWorkflowSubmit);
+  elements.vehicleWorkflowBoard?.addEventListener("click", handleVehicleWorkflowAction);
   elements.addUserForm.addEventListener("submit", handleAddUser);
   elements.toggleAddUserForm.addEventListener("click", handleToggleAddUserForm);
   elements.pantryAlertsToggle.addEventListener("click", handlePantryAlertsToggle);
