@@ -1865,63 +1865,121 @@ textarea {
   font-size: 0.85rem;
 }
 
-/* PC monitoring board - one card per employee, with the call log. */
+/* PC monitoring board - one compact row per employee to be chased. */
 .pc-employee-card {
   display: grid;
-  gap: 0.6rem;
+  gap: 0.55rem;
 }
 
-.pc-employee-card__header {
+.pc-employee-card__top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
 }
 
-.pc-employee-card__header > div {
+.pc-employee-card__who {
   display: flex;
+  min-width: 0;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.1rem;
 }
 
-.pc-employee-card__header span {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.pc-employee-card__tasks {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.85rem;
+.pc-employee-card__who strong {
+  font-size: 1rem;
   overflow-wrap: anywhere;
+}
+
+.pc-employee-card__who span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* Distinct job names as chips, so a long list stays one tidy line or two
+   instead of a paragraph of repeated titles. */
+.pc-employee-card__jobs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.pc-employee-card__jobs span {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(21, 33, 38, 0.06);
+  color: var(--muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16rem;
+}
+
+.pc-employee-card__jobs-more {
+  background: none !important;
+  font-weight: 600;
+}
+
+/* The whole header is the click target for opening the task list. */
+.pc-employee-summary {
+  display: grid;
+  gap: 0.5rem;
+  cursor: pointer;
+  list-style-type: none;
+}
+
+/* Three ways to kill the disclosure triangle, because engines disagree:
+   ::marker is the standard, ::-webkit-details-marker covers older WebKit,
+   and `display: grid` above already drops it in Chrome by taking the summary
+   out of list-item layout. */
+.pc-employee-summary::marker {
+  content: "";
+}
+
+.pc-employee-summary::-webkit-details-marker {
+  display: none;
+}
+
+.pc-employee-summary__hint {
+  color: var(--accent-dark, rgb(31, 107, 99));
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+.pc-employee-summary:hover .pc-employee-summary__hint {
+  text-decoration: underline;
+}
+
+.pc-employee-details[open] .pc-employee-summary__hint::after {
+  content: " (close)";
+  font-weight: 400;
+}
+
+.pc-employee-tasks {
+  margin-top: 0.7rem;
+}
+
+.pc-employee-details {
+  margin: 0;
 }
 
 .pc-followup {
-  display: grid;
-  gap: 0.5rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid var(--line);
-}
-
-.pc-followup__log {
-  margin: 0;
-  padding: 0.45rem 0.65rem;
-  border-radius: 10px;
-  background: rgba(31, 107, 99, 0.08);
-  color: var(--text);
-  font-size: 0.82rem;
-  overflow-wrap: anywhere;
-}
-
-.pc-followup__row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
-.pc-followup__row input {
-  flex: 1 1 220px;
+.pc-followup input {
+  flex: 1 1 auto;
   min-width: 0;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.85rem;
+}
+
+.pc-followup__meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
 }
 
 /* Searchable vehicle dropdown on Kamal's allocation desk. */

@@ -414,41 +414,81 @@ const PC_BOARD_PAGE_SIZE = 8;
 
 // One card per employee: how far along they are, what is still outstanding,
 // and - for anyone still being chased - the call log.
+// One row per employee. The header is a <summary>, so clicking the name opens
+// the employee's full task list for the day; the reason box sits outside that
+// summary, both so it stays one click away and because a form inside a
+// <summary> would toggle the panel every time the input is clicked.
 function createPcEmployeeCard(group, selectedDate, showFollowUp) {
   const total = group.done.length + group.outstanding.length;
   const card = document.createElement("article");
   card.className = "task-card pc-employee-card";
 
   const followUp = showFollowUp ? getFollowUpRecord(group.key, selectedDate) : null;
-  const outstandingNames = group.outstanding
-    .map((entry) => entry.task.title)
-    .filter(Boolean);
+
+  // Per-customer tasks repeat the same title dozens of times - one employee had
+  // 176 outstanding occurrences drawn from eight distinct jobs. Listing them
+  // raw filled the screen with duplicates, so show the distinct job names and
+  // count the rest.
+  const distinctJobs = [...new Set(group.outstanding.map((entry) => entry.task.title).filter(Boolean))];
+  const shownJobs = distinctJobs.slice(0, 3);
+  const hiddenJobCount = distinctJobs.length - shownJobs.length;
+
+  // Outstanding first - that is what the call is about.
+  const rows = [
+    ...group.outstanding.map((entry) => ({ entry, done: false })),
+    ...group.done.map((entry) => ({ entry, done: true })),
+  ];
 
   card.innerHTML = `
-    <div class="pc-employee-card__header">
-      <div>
-        <strong>${escapeHtml(group.name)}</strong>
-        <span>${escapeHtml(group.department ? `Department ${group.department}` : "Department -")}</span>
+    <details class="pc-employee-details" data-pc-employee-key="${escapeHtml(group.key)}"${
+      state.pcExpandedEmployees?.[group.key] ? " open" : ""
+    }>
+      <summary class="pc-employee-summary">
+        <div class="pc-employee-card__top">
+          <div class="pc-employee-card__who">
+            <strong>${escapeHtml(group.name)}</strong>
+            <span>${escapeHtml([group.department || "No department", `${group.done.length} of ${total} done`].join(" · "))}</span>
+          </div>
+          <span class="task-badge${group.outstanding.length ? " task-badge--alert" : ""}">${escapeHtml(
+            group.outstanding.length ? `${group.outstanding.length} pending` : "All done"
+          )}</span>
+        </div>
+        ${shownJobs.length
+          ? `<p class="pc-employee-card__jobs">${shownJobs.map((job) => `<span>${escapeHtml(job)}</span>`).join("")}${
+              hiddenJobCount > 0 ? `<span class="pc-employee-card__jobs-more">+${hiddenJobCount} more</span>` : ""
+            }</p>`
+          : ""}
+        <span class="pc-employee-summary__hint">${escapeHtml(`View all ${total} task${total === 1 ? "" : "s"}`)}</span>
+      </summary>
+      <div class="table-shell pc-employee-tasks">
+        <table class="user-table">
+          <thead><tr><th>Task</th><th>Customer</th><th>Walk-in ID</th><th>Status</th></tr></thead>
+          <tbody>
+            ${rows.map(({ entry, done }) => `
+              <tr>
+                <td>${escapeHtml(getTaskDisplayTitle(entry.task))}</td>
+                <td>${escapeHtml(getTaskCustomerLabel(entry.task))}</td>
+                <td>${escapeHtml(getTaskCustomerKey(entry.task) || "-")}</td>
+                <td>${done
+                  ? '<span class="task-badge">Submitted</span>'
+                  : entry.completion
+                    ? '<span class="task-badge task-badge--alert">Marked not completed</span>'
+                    : '<span class="task-badge task-badge--alert">Not submitted</span>'}</td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
       </div>
-      <span class="task-badge${group.outstanding.length ? " task-badge--alert" : ""}">${escapeHtml(
-        group.outstanding.length
-          ? `${group.done.length} of ${total} done`
-          : `${total} of ${total} done`
-      )}</span>
-    </div>
-    ${outstandingNames.length
-      ? `<p class="pc-employee-card__tasks">Outstanding: ${escapeHtml(outstandingNames.join(", "))}</p>`
-      : ""}
+    </details>
     ${showFollowUp
       ? `<form class="pc-followup" data-pc-followup data-employee-key="${escapeHtml(group.key)}" data-employee-name="${escapeHtml(group.name)}" data-employee-email="${escapeHtml(group.email)}">
-          ${followUp
-            ? `<p class="pc-followup__log">Called ${escapeHtml(formatDateTimeValue(followUp.loggedAt))} by ${escapeHtml(followUp.loggedByName || "-")}: ${escapeHtml(followUp.note || "-")}</p>`
-            : ""}
-          <div class="pc-followup__row">
-            <input type="text" name="note" data-pc-followup-note placeholder="${escapeHtml(followUp ? "Update what they said on the call" : "What did they say on the call?")}" autocomplete="off" />
-            <button type="submit" class="button button--primary button--compact">${escapeHtml(followUp ? "Update call" : "Log call")}</button>
-          </div>
-        </form>`
+          <input type="text" name="note" data-pc-followup-note
+            value="${escapeHtml(followUp?.note || "")}"
+            placeholder="Reason the employee gave" autocomplete="off" />
+          <button type="submit" class="button button--ghost button--compact">Save</button>
+        </form>
+        ${followUp
+          ? `<p class="pc-followup__meta">Noted by ${escapeHtml(followUp.loggedByName || "-")} at ${escapeHtml(formatTimeValue(followUp.loggedAt))}</p>`
+          : ""}`
       : ""}
   `;
 

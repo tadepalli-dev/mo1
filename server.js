@@ -1639,7 +1639,15 @@ const server = http.createServer((request, response) => {
     // long after the files on disk had changed. "no-cache" forces a
     // revalidation on every load, and the ETag keeps that to a cheap 304 when
     // nothing has actually moved.
-    if ([".html", ".js", ".css"].includes(extension)) {
+    if (extension === ".html") {
+      // The page shell names every script and style, so a stale copy of it
+      // pins the whole app to an old build - and it is the one file whose
+      // markup renders even when the scripts fail, which makes a stale shell
+      // look exactly like broken code. Never store it.
+      headers["Cache-Control"] = "no-store, must-revalidate";
+      headers.Pragma = "no-cache";
+      headers.Expires = "0";
+    } else if ([".js", ".css"].includes(extension)) {
       const etag = `"${crypto.createHash("sha1").update(file).digest("hex")}"`;
       headers["Cache-Control"] = "no-cache";
       headers.ETag = etag;

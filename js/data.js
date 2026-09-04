@@ -1626,6 +1626,7 @@ const state = {
   vehicleAllocations: {},
   checklistFollowUps: {},
   pcMonitorTab: "pending",
+  pcExpandedEmployees: {},
   pcPendingPage: 1,
   pcNotCompletedPage: 1,
   pcCompletedPage: 1,

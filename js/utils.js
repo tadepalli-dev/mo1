@@ -551,6 +551,19 @@ function formatDateTimeValue(value) {
 }
 
 
+// The board is already scoped to one date, so a follow-up only needs the time.
+function formatTimeValue(value) {
+  if (!value) {
+    return "-";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+
 function setStatusMessage(element, text, status) {
   element.textContent = text;
   element.classList.remove("is-error", "is-success");

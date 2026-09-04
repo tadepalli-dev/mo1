@@ -1571,6 +1571,26 @@ function handleEmployeeTaskFilterChange() {
 }
 
 
+// A card left open must stay open across the 60-second dashboard refresh,
+// which rebuilds every row. "toggle" does not bubble, hence the capture-phase
+// listener in bindEvents.
+function handlePcEmployeeToggle(event) {
+  const details = event.target;
+  if (!details?.matches?.("[data-pc-employee-key]")) {
+    return;
+  }
+  const key = details.getAttribute("data-pc-employee-key");
+  if (!state.pcExpandedEmployees || typeof state.pcExpandedEmployees !== "object") {
+    state.pcExpandedEmployees = {};
+  }
+  if (details.open) {
+    state.pcExpandedEmployees[key] = true;
+  } else {
+    delete state.pcExpandedEmployees[key];
+  }
+}
+
+
 function handlePcMonitorTabClick(event) {
   const button = event.target.closest("[data-pc-tab]");
   if (!button) {
@@ -1581,9 +1601,10 @@ function handlePcMonitorTabClick(event) {
 }
 
 
-// The PC rings whoever is behind and records what they said. One record per
-// employee per day - calling again overwrites the note rather than stacking up,
-// which matches how the board is read: "where does this person stand today?"
+// The PC phones whoever is behind on their own handset; the app only holds the
+// reason they gave. One record per employee per day - saving again replaces it
+// rather than stacking up, which matches how the board is read: "where does
+// this person stand today?"
 async function handlePcFollowUpSubmit(event) {
   const form = event.target.closest("[data-pc-followup]");
   if (!form) {
@@ -1594,7 +1615,7 @@ async function handlePcFollowUpSubmit(event) {
   const input = form.querySelector("[data-pc-followup-note]");
   const note = String(input?.value || "").trim();
   if (!note) {
-    window.alert("Enter what the employee said on the call.");
+    window.alert("Enter the reason the employee gave.");
     input?.focus();
     return;
   }
@@ -1605,7 +1626,7 @@ async function handlePcFollowUpSubmit(event) {
   const idleLabel = button?.textContent;
   if (button) {
     button.disabled = true;
-    button.textContent = "Saving...";
+    button.textContent = "Saving";
   }
 
   const store = state.checklistFollowUps && typeof state.checklistFollowUps === "object"
