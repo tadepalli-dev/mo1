@@ -336,6 +336,153 @@ function buildChecklistMonitorSnapshot(selectedDate) {
 }
 
 
+// Groups every checklist occurrence for a date by the employee it belongs to,
+// so the PC can chase people rather than rows. An employee sits in exactly one
+// bucket: nothing done at all, some done with work left, or everything done.
+//
+// A checklist submitted as "not completed" counts as outstanding, not done -
+// the employee has reported on it, but the job itself still needs chasing,
+// which is the whole point of this board.
+function buildPcEmployeeBuckets(selectedDate) {
+  const selectedDateObject = new Date(`${selectedDate}T00:00:00`);
+
+  const completionsByKey = new Map();
+  Object.entries(state.completions).forEach(([key, completion]) => {
+    if (!isMonitorableCompletionRecord(key, completion)) {
+      return;
+    }
+    if ((completion.occurrenceDate || toDateValue(completion.submittedAt)) !== selectedDate) {
+      return;
+    }
+    completionsByKey.set(key, completion);
+  });
+
+  const byEmployee = new Map();
+  state.tasks
+    .filter((task) => task.active !== false && taskOccursOnDate(task, selectedDate))
+    .flatMap((task) => createTaskOccurrencesForDate(task, selectedDateObject))
+    .filter((task) => isTaskCompletionEnabled(task))
+    .forEach((task) => {
+      const email = String(task.assigneeEmail || "").trim().toLowerCase();
+      const groupKey = email || normalizePersonName(task.assigneeName);
+      if (!groupKey) {
+        return;
+      }
+      if (!byEmployee.has(groupKey)) {
+        byEmployee.set(groupKey, {
+          key: groupKey,
+          email: task.assigneeEmail || "",
+          name: task.assigneeName || task.assigneeEmail || "Unnamed",
+          department: task.department || "",
+          done: [],
+          outstanding: [],
+        });
+      }
+      const group = byEmployee.get(groupKey);
+      const completion = completionsByKey.get(getCompletionKey(task)) || null;
+      if (completion && completion.status !== "not_completed") {
+        group.done.push({ task, completion });
+      } else {
+        group.outstanding.push({ task, completion });
+      }
+    });
+
+  const groups = [...byEmployee.values()].sort((left, right) => left.name.localeCompare(right.name));
+  return {
+    pending: groups.filter((group) => group.done.length === 0),
+    notCompleted: groups.filter((group) => group.done.length > 0 && group.outstanding.length > 0),
+    completed: groups.filter((group) => group.outstanding.length === 0),
+  };
+}
+
+
+function getFollowUpKey(employeeKey, selectedDate) {
+  return `${String(employeeKey || "").trim().toLowerCase()}__${selectedDate}`;
+}
+
+
+function getFollowUpRecord(employeeKey, selectedDate) {
+  const store = state.checklistFollowUps;
+  if (!store || typeof store !== "object") {
+    return null;
+  }
+  return store[getFollowUpKey(employeeKey, selectedDate)] || null;
+}
+
+
+const PC_BOARD_PAGE_SIZE = 8;
+
+// One card per employee: how far along they are, what is still outstanding,
+// and - for anyone still being chased - the call log.
+function createPcEmployeeCard(group, selectedDate, showFollowUp) {
+  const total = group.done.length + group.outstanding.length;
+  const card = document.createElement("article");
+  card.className = "task-card pc-employee-card";
+
+  const followUp = showFollowUp ? getFollowUpRecord(group.key, selectedDate) : null;
+  const outstandingNames = group.outstanding
+    .map((entry) => entry.task.title)
+    .filter(Boolean);
+
+  card.innerHTML = `
+    <div class="pc-employee-card__header">
+      <div>
+        <strong>${escapeHtml(group.name)}</strong>
+        <span>${escapeHtml(group.department ? `Department ${group.department}` : "Department -")}</span>
+      </div>
+      <span class="task-badge${group.outstanding.length ? " task-badge--alert" : ""}">${escapeHtml(
+        group.outstanding.length
+          ? `${group.done.length} of ${total} done`
+          : `${total} of ${total} done`
+      )}</span>
+    </div>
+    ${outstandingNames.length
+      ? `<p class="pc-employee-card__tasks">Outstanding: ${escapeHtml(outstandingNames.join(", "))}</p>`
+      : ""}
+    ${showFollowUp
+      ? `<form class="pc-followup" data-pc-followup data-employee-key="${escapeHtml(group.key)}" data-employee-name="${escapeHtml(group.name)}" data-employee-email="${escapeHtml(group.email)}">
+          ${followUp
+            ? `<p class="pc-followup__log">Called ${escapeHtml(formatDateTimeValue(followUp.loggedAt))} by ${escapeHtml(followUp.loggedByName || "-")}: ${escapeHtml(followUp.note || "-")}</p>`
+            : ""}
+          <div class="pc-followup__row">
+            <input type="text" name="note" data-pc-followup-note placeholder="${escapeHtml(followUp ? "Update what they said on the call" : "What did they say on the call?")}" autocomplete="off" />
+            <button type="submit" class="button button--primary button--compact">${escapeHtml(followUp ? "Update call" : "Log call")}</button>
+          </div>
+        </form>`
+      : ""}
+  `;
+
+  return card;
+}
+
+
+function renderPcEmployeeBoard(groups, options) {
+  const { board, emptyState, pagination, pageKey, selectedDate, showFollowUp } = options;
+  board.innerHTML = "";
+  pagination.innerHTML = "";
+
+  if (!groups.length) {
+    emptyState.classList.remove("hidden");
+    return;
+  }
+  emptyState.classList.add("hidden");
+
+  const totalPages = Math.max(1, Math.ceil(groups.length / PC_BOARD_PAGE_SIZE));
+  const currentPage = Math.min(Math.max(state[pageKey] || 1, 1), totalPages);
+  state[pageKey] = currentPage;
+
+  const startIndex = (currentPage - 1) * PC_BOARD_PAGE_SIZE;
+  groups.slice(startIndex, startIndex + PC_BOARD_PAGE_SIZE).forEach((group) => {
+    board.append(createPcEmployeeCard(group, selectedDate, showFollowUp));
+  });
+
+  renderPaginationControls(pagination, currentPage, totalPages, (page) => {
+    state[pageKey] = page;
+    renderPcDashboardPanel();
+  });
+}
+
+
 function renderPcDashboardPanel() {
   if (!elements.pcDashboardPanel) {
     return;
@@ -347,9 +494,61 @@ function renderPcDashboardPanel() {
     elements.pcMonitorDateInput.value = selectedDate;
   }
 
+  // Typing a follow-up note must survive the 60-second dashboard refresh,
+  // which rebuilds these boards from scratch.
+  if (document.activeElement?.closest?.("[data-pc-followup-note]")) {
+    return;
+  }
+
   const submittedEntries = buildChecklistMonitorSnapshot(selectedDate).submittedEntries;
   const employeeCount = getEmployeeCountForEntries(submittedEntries);
   const formattedDate = formatDateValue(selectedDate);
+
+  const buckets = buildPcEmployeeBuckets(selectedDate);
+  elements.pcPendingTabCount.textContent = String(buckets.pending.length);
+  elements.pcNotCompletedTabCount.textContent = String(buckets.notCompleted.length);
+  elements.pcCompletedTabCount.textContent = String(buckets.completed.length);
+  elements.pcPendingMeta.textContent = `${buckets.pending.length} employee${buckets.pending.length === 1 ? "" : "s"} have submitted nothing on ${formattedDate}`;
+  elements.pcNotCompletedMeta.textContent = `${buckets.notCompleted.length} employee${buckets.notCompleted.length === 1 ? "" : "s"} still have tasks left on ${formattedDate}`;
+  elements.pcCompletedMeta.textContent = `${buckets.completed.length} employee${buckets.completed.length === 1 ? "" : "s"} finished everything on ${formattedDate}`;
+  elements.pcPendingEmpty.textContent = `Nobody is outstanding on ${formattedDate}.`;
+  elements.pcNotCompletedEmpty.textContent = `No part-finished employees on ${formattedDate}.`;
+  elements.pcCompletedEmpty.textContent = `Nobody has finished everything on ${formattedDate}.`;
+
+  const activeTab = ["pending", "notcompleted", "completed"].includes(state.pcMonitorTab)
+    ? state.pcMonitorTab
+    : "pending";
+  elements.pcPendingSection.classList.toggle("hidden", activeTab !== "pending");
+  elements.pcNotCompletedSection.classList.toggle("hidden", activeTab !== "notcompleted");
+  elements.pcCompletedSection.classList.toggle("hidden", activeTab !== "completed");
+  elements.pcMonitorTabNav?.querySelectorAll("[data-pc-tab]").forEach((button) => {
+    button.classList.toggle("is-active", button.getAttribute("data-pc-tab") === activeTab);
+  });
+
+  renderPcEmployeeBoard(buckets.pending, {
+    board: elements.pcPendingBoard,
+    emptyState: elements.pcPendingEmpty,
+    pagination: elements.pcPendingPagination,
+    pageKey: "pcPendingPage",
+    selectedDate,
+    showFollowUp: true,
+  });
+  renderPcEmployeeBoard(buckets.notCompleted, {
+    board: elements.pcNotCompletedBoard,
+    emptyState: elements.pcNotCompletedEmpty,
+    pagination: elements.pcNotCompletedPagination,
+    pageKey: "pcNotCompletedPage",
+    selectedDate,
+    showFollowUp: true,
+  });
+  renderPcEmployeeBoard(buckets.completed, {
+    board: elements.pcCompletedBoard,
+    emptyState: elements.pcCompletedEmpty,
+    pagination: elements.pcCompletedPagination,
+    pageKey: "pcCompletedPage",
+    selectedDate,
+    showFollowUp: false,
+  });
 
   elements.pcTodaySummary.textContent = submittedEntries.length
     ? `Showing submitted checklists for ${formattedDate}. Click an employee name to open all tasks for that date.`

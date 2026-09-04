@@ -694,6 +694,8 @@ async function bootstrapState() {
   state.vehicleChangeRequests = Array.isArray(server?.vehicleChangeRequests) ? server.vehicleChangeRequests : [];
   state.vehicleAllocations =
     server?.vehicleAllocations && typeof server.vehicleAllocations === "object" ? server.vehicleAllocations : {};
+  state.checklistFollowUps =
+    server?.checklistFollowUps && typeof server.checklistFollowUps === "object" ? server.checklistFollowUps : {};
 }
 
 
@@ -782,6 +784,9 @@ async function refreshStateFromServer() {
   }
   if (server.vehicleAllocations && typeof server.vehicleAllocations === "object") {
     state.vehicleAllocations = server.vehicleAllocations;
+  }
+  if (server.checklistFollowUps && typeof server.checklistFollowUps === "object") {
+    state.checklistFollowUps = server.checklistFollowUps;
   }
 }
 

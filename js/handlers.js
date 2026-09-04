@@ -1571,6 +1571,78 @@ function handleEmployeeTaskFilterChange() {
 }
 
 
+function handlePcMonitorTabClick(event) {
+  const button = event.target.closest("[data-pc-tab]");
+  if (!button) {
+    return;
+  }
+  state.pcMonitorTab = button.getAttribute("data-pc-tab");
+  renderPcDashboardPanel();
+}
+
+
+// The PC rings whoever is behind and records what they said. One record per
+// employee per day - calling again overwrites the note rather than stacking up,
+// which matches how the board is read: "where does this person stand today?"
+async function handlePcFollowUpSubmit(event) {
+  const form = event.target.closest("[data-pc-followup]");
+  if (!form) {
+    return;
+  }
+  event.preventDefault();
+
+  const input = form.querySelector("[data-pc-followup-note]");
+  const note = String(input?.value || "").trim();
+  if (!note) {
+    window.alert("Enter what the employee said on the call.");
+    input?.focus();
+    return;
+  }
+
+  const employeeKey = form.dataset.employeeKey;
+  const selectedDate = state.pcMonitorDate || todayValue();
+  const button = form.querySelector("button[type='submit']");
+  const idleLabel = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Saving...";
+  }
+
+  const store = state.checklistFollowUps && typeof state.checklistFollowUps === "object"
+    ? { ...state.checklistFollowUps }
+    : {};
+  store[getFollowUpKey(employeeKey, selectedDate)] = {
+    employeeKey,
+    employeeName: form.dataset.employeeName || "",
+    employeeEmail: form.dataset.employeeEmail || "",
+    date: selectedDate,
+    note,
+    loggedAt: new Date().toISOString(),
+    loggedByEmail: state.activeUser?.email || "",
+    loggedByName: state.activeUser?.name || state.activeUser?.email || "",
+  };
+
+  const previous = state.checklistFollowUps;
+  state.checklistFollowUps = store;
+
+  try {
+    await persistCollection("checklistFollowUps", store);
+  } catch (error) {
+    // Put the board back the way it was rather than showing a call that was
+    // never actually saved.
+    state.checklistFollowUps = previous;
+    if (button) {
+      button.disabled = false;
+      button.textContent = idleLabel;
+    }
+    window.alert("Could not save the follow-up. Check the connection and try again.");
+    return;
+  }
+
+  renderPcDashboardPanel();
+}
+
+
 function handlePcMonitorDateChange() {
   state.pcMonitorDate = elements.pcMonitorDateInput.value || todayValue();
   state.pcSubmittedPage = 1;

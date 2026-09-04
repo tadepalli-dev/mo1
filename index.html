@@ -280,6 +280,57 @@
 
               <div id="pcTodaySummary" class="board-meta"></div>
 
+              <div class="tab-nav" id="pcMonitorTabNav" role="tablist">
+                <button type="button" class="tab-button is-active" data-pc-tab="pending" role="tab">
+                  Pending <span class="tab-count" id="pcPendingTabCount">0</span>
+                </button>
+                <button type="button" class="tab-button" data-pc-tab="notcompleted" role="tab">
+                  Not completed <span class="tab-count" id="pcNotCompletedTabCount">0</span>
+                </button>
+                <button type="button" class="tab-button" data-pc-tab="completed" role="tab">
+                  Completed <span class="tab-count" id="pcCompletedTabCount">0</span>
+                </button>
+              </div>
+
+              <div id="pcPendingSection" class="pantry-alerts-section">
+                <div class="board-heading">
+                  <div>
+                    <p class="section-label">Follow up</p>
+                    <h3>Nothing submitted yet</h3>
+                  </div>
+                  <p id="pcPendingMeta" class="board-meta"></p>
+                </div>
+                <div id="pcPendingBoard" class="task-board"></div>
+                <div id="pcPendingEmpty" class="empty-state hidden"></div>
+                <div id="pcPendingPagination" class="pagination"></div>
+              </div>
+
+              <div id="pcNotCompletedSection" class="pantry-alerts-section hidden">
+                <div class="board-heading">
+                  <div>
+                    <p class="section-label">Follow up</p>
+                    <h3>Partly done</h3>
+                  </div>
+                  <p id="pcNotCompletedMeta" class="board-meta"></p>
+                </div>
+                <div id="pcNotCompletedBoard" class="task-board"></div>
+                <div id="pcNotCompletedEmpty" class="empty-state hidden"></div>
+                <div id="pcNotCompletedPagination" class="pagination"></div>
+              </div>
+
+              <div id="pcCompletedSection" class="pantry-alerts-section hidden">
+                <div class="board-heading">
+                  <div>
+                    <p class="section-label">Monitor</p>
+                    <h3>All tasks done</h3>
+                  </div>
+                  <p id="pcCompletedMeta" class="board-meta"></p>
+                </div>
+                <div id="pcCompletedBoard" class="task-board"></div>
+                <div id="pcCompletedEmpty" class="empty-state hidden"></div>
+                <div id="pcCompletedPagination" class="pagination"></div>
+              </div>
+
               <div id="pcSubmittedSection" class="pantry-alerts-section">
                 <div class="board-heading">
                   <div>

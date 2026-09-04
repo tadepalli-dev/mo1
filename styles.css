@@ -1865,6 +1865,65 @@ textarea {
   font-size: 0.85rem;
 }
 
+/* PC monitoring board - one card per employee, with the call log. */
+.pc-employee-card {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.pc-employee-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.pc-employee-card__header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.pc-employee-card__header span {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.pc-employee-card__tasks {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.pc-followup {
+  display: grid;
+  gap: 0.5rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
+.pc-followup__log {
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+  border-radius: 10px;
+  background: rgba(31, 107, 99, 0.08);
+  color: var(--text);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.pc-followup__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.pc-followup__row input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
 /* Searchable vehicle dropdown on Kamal's allocation desk. */
 .vehicle-picker {
   position: relative;

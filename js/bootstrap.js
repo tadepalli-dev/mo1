@@ -58,6 +58,8 @@ function bindEvents() {
   elements.homeSearchInput.addEventListener("input", handleHomeSearch);
   elements.dashboardDateInput.addEventListener("change", handleAdminDateChange);
   elements.pcMonitorDateInput?.addEventListener("change", handlePcMonitorDateChange);
+  elements.pcMonitorTabNav?.addEventListener("click", handlePcMonitorTabClick);
+  elements.pcDashboardPanel?.addEventListener("submit", handlePcFollowUpSubmit);
   elements.closeAssignTaskButton.addEventListener("click", closeAssignTaskModal);
   elements.assignTaskModal.addEventListener("click", handleAssignModalBackdropClick);
   elements.assignTaskForm.addEventListener("submit", handleAssignTask);
