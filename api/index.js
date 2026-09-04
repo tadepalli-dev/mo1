@@ -58,6 +58,8 @@ const STORE_DEFAULTS = {
   checklistFollowUps: {},
 };
 const CASHIER_EMAIL = "dilip.gupta@curtainsandcarpets.com";
+const LEGACY_HRULLEKHA_EMAIL = "hrullekha@modesigns.in";
+const TADEPALLI_EMAIL = "tadepalli@modesigns.in";
 
 const SESSION_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 const LEAVE_SHEET_ID = "1tIAHEepKuv57BHjTg_qIQgXfbzrUjhEYUv_5kfyMD0U";
@@ -325,6 +327,18 @@ function readUsersWithPasswords() {
 async function readUsersWithPasswordsAsync() {
   const users = await readStoreValueAsync("users");
   return Array.isArray(users) ? users : [];
+}
+
+async function migrateTadepalliUserEmail(users) {
+  const legacyUser = users.find((user) => normalizeEmail(user.email) === LEGACY_HRULLEKHA_EMAIL);
+  const replacementExists = users.some((user) => normalizeEmail(user.email) === TADEPALLI_EMAIL);
+  if (!legacyUser || replacementExists) {
+    return users;
+  }
+
+  legacyUser.email = TADEPALLI_EMAIL;
+  await writeStoreValueAsync("users", users);
+  return users;
 }
 
 // GET /api/store never sends real passwords to the browser (see
@@ -728,7 +742,8 @@ async function handleLogin(request, response) {
 
   const email = String(payload.email || "").trim().toLowerCase();
   const password = String(payload.password || "").trim();
-  const users = await readUsersWithPasswordsAsync();
+  let users = await readUsersWithPasswordsAsync();
+  users = await migrateTadepalliUserEmail(users);
   const matchedUser = users.find((user) => matchesUserEmail(user, email));
 
   if (!matchedUser) {

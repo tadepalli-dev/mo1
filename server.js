@@ -150,6 +150,8 @@ const STORE_DEFAULTS = {
   checklistFollowUps: {},
 };
 const CASHIER_EMAIL = "dilip.gupta@curtainsandcarpets.com";
+const LEGACY_HRULLEKHA_EMAIL = "hrullekha@modesigns.in";
+const TADEPALLI_EMAIL = "tadepalli@modesigns.in";
 
 const getStoreStatement = db.prepare("SELECT value FROM kv_store WHERE key = ?");
 const setStoreStatement = db.prepare(
@@ -317,6 +319,18 @@ function preserveExistingPasswords(incomingUsers) {
 function readUsersWithPasswords() {
   const users = readStoreValue("users");
   return Array.isArray(users) ? users : [];
+}
+
+function migrateTadepalliUserEmail(users) {
+  const legacyUser = users.find((user) => normalizeEmail(user.email) === LEGACY_HRULLEKHA_EMAIL);
+  const replacementExists = users.some((user) => normalizeEmail(user.email) === TADEPALLI_EMAIL);
+  if (!legacyUser || replacementExists) {
+    return users;
+  }
+
+  legacyUser.email = TADEPALLI_EMAIL;
+  writeStoreValue("users", users);
+  return users;
 }
 
 // Buddy/week-off roster and checklist-question rules, mirrored here (from
@@ -1013,7 +1027,7 @@ const server = http.createServer((request, response) => {
 
       const email = String(payload.email || "").trim().toLowerCase();
       const password = String(payload.password || "").trim();
-      const users = readUsersWithPasswords();
+      const users = migrateTadepalliUserEmail(readUsersWithPasswords());
       const matchedUser = users.find((user) => matchesUserEmail(user, email));
 
       if (!matchedUser) {
