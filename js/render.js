@@ -389,9 +389,13 @@ function buildPcEmployeeBuckets(selectedDate) {
 
   const groups = [...byEmployee.values()].sort((left, right) => left.name.localeCompare(right.name));
   return {
+    // Nothing submitted at all - the employees who need chasing first.
     pending: groups.filter((group) => group.done.length === 0),
+    // Started but not finished. An employee here also appears under completed,
+    // listing the opposite half of their day.
     notCompleted: groups.filter((group) => group.done.length > 0 && group.outstanding.length > 0),
-    completed: groups.filter((group) => group.outstanding.length === 0),
+    // Anyone with at least one finished task, whether or not the rest is done.
+    completed: groups.filter((group) => group.done.length > 0),
   };
 }
 
@@ -418,26 +422,27 @@ const PC_BOARD_PAGE_SIZE = 8;
 // the employee's full task list for the day; the reason box sits outside that
 // summary, both so it stays one click away and because a form inside a
 // <summary> would toggle the panel every time the input is clicked.
-function createPcEmployeeCard(group, selectedDate, showFollowUp) {
+function createPcEmployeeCard(group, selectedDate, showFollowUp, view) {
   const total = group.done.length + group.outstanding.length;
   const card = document.createElement("article");
   card.className = "task-card pc-employee-card";
 
   const followUp = showFollowUp ? getFollowUpRecord(group.key, selectedDate) : null;
 
+  // Each tab answers one question, so the card - chips, counts and panel alike -
+  // covers only the tasks that tab is about: what they finished, or what is
+  // still outstanding.
+  const showingDone = view === "completed";
+  const shownEntries = showingDone ? group.done : group.outstanding;
+  const rows = shownEntries.map((entry) => ({ entry, done: showingDone }));
+
   // Per-customer tasks repeat the same title dozens of times - one employee had
   // 176 outstanding occurrences drawn from eight distinct jobs. Listing them
   // raw filled the screen with duplicates, so show the distinct job names and
   // count the rest.
-  const distinctJobs = [...new Set(group.outstanding.map((entry) => entry.task.title).filter(Boolean))];
+  const distinctJobs = [...new Set(shownEntries.map((entry) => entry.task.title).filter(Boolean))];
   const shownJobs = distinctJobs.slice(0, 3);
   const hiddenJobCount = distinctJobs.length - shownJobs.length;
-
-  // Outstanding first - that is what the call is about.
-  const rows = [
-    ...group.outstanding.map((entry) => ({ entry, done: false })),
-    ...group.done.map((entry) => ({ entry, done: true })),
-  ];
 
   card.innerHTML = `
     <details class="pc-employee-details" data-pc-employee-key="${escapeHtml(group.key)}"${
@@ -449,8 +454,8 @@ function createPcEmployeeCard(group, selectedDate, showFollowUp) {
             <strong>${escapeHtml(group.name)}</strong>
             <span>${escapeHtml([group.department || "No department", `${group.done.length} of ${total} done`].join(" · "))}</span>
           </div>
-          <span class="task-badge${group.outstanding.length ? " task-badge--alert" : ""}">${escapeHtml(
-            group.outstanding.length ? `${group.outstanding.length} pending` : "All done"
+          <span class="task-badge${showingDone ? "" : " task-badge--alert"}">${escapeHtml(
+            showingDone ? `${group.done.length} done` : `${group.outstanding.length} pending`
           )}</span>
         </div>
         ${shownJobs.length
@@ -458,7 +463,11 @@ function createPcEmployeeCard(group, selectedDate, showFollowUp) {
               hiddenJobCount > 0 ? `<span class="pc-employee-card__jobs-more">+${hiddenJobCount} more</span>` : ""
             }</p>`
           : ""}
-        <span class="pc-employee-summary__hint">${escapeHtml(`View all ${total} task${total === 1 ? "" : "s"}`)}</span>
+        <span class="pc-employee-summary__hint">${escapeHtml(
+          showingDone
+            ? `View the ${rows.length} completed task${rows.length === 1 ? "" : "s"}`
+            : `View the ${rows.length} outstanding task${rows.length === 1 ? "" : "s"}`
+        )}</span>
       </summary>
       <div class="table-shell pc-employee-tasks">
         <table class="user-table">
@@ -497,7 +506,7 @@ function createPcEmployeeCard(group, selectedDate, showFollowUp) {
 
 
 function renderPcEmployeeBoard(groups, options) {
-  const { board, emptyState, pagination, pageKey, selectedDate, showFollowUp } = options;
+  const { board, emptyState, pagination, pageKey, selectedDate, showFollowUp, view } = options;
   board.innerHTML = "";
   pagination.innerHTML = "";
 
@@ -513,7 +522,7 @@ function renderPcEmployeeBoard(groups, options) {
 
   const startIndex = (currentPage - 1) * PC_BOARD_PAGE_SIZE;
   groups.slice(startIndex, startIndex + PC_BOARD_PAGE_SIZE).forEach((group) => {
-    board.append(createPcEmployeeCard(group, selectedDate, showFollowUp));
+    board.append(createPcEmployeeCard(group, selectedDate, showFollowUp, view));
   });
 
   renderPaginationControls(pagination, currentPage, totalPages, (page) => {
@@ -550,10 +559,10 @@ function renderPcDashboardPanel() {
   elements.pcCompletedTabCount.textContent = String(buckets.completed.length);
   elements.pcPendingMeta.textContent = `${buckets.pending.length} employee${buckets.pending.length === 1 ? "" : "s"} have submitted nothing on ${formattedDate}`;
   elements.pcNotCompletedMeta.textContent = `${buckets.notCompleted.length} employee${buckets.notCompleted.length === 1 ? "" : "s"} still have tasks left on ${formattedDate}`;
-  elements.pcCompletedMeta.textContent = `${buckets.completed.length} employee${buckets.completed.length === 1 ? "" : "s"} finished everything on ${formattedDate}`;
+  elements.pcCompletedMeta.textContent = `${buckets.completed.length} employee${buckets.completed.length === 1 ? "" : "s"} finished at least one task on ${formattedDate}`;
   elements.pcPendingEmpty.textContent = `Nobody is outstanding on ${formattedDate}.`;
   elements.pcNotCompletedEmpty.textContent = `No part-finished employees on ${formattedDate}.`;
-  elements.pcCompletedEmpty.textContent = `Nobody has finished everything on ${formattedDate}.`;
+  elements.pcCompletedEmpty.textContent = `Nobody has finished a task on ${formattedDate}.`;
 
   const activeTab = ["pending", "notcompleted", "completed"].includes(state.pcMonitorTab)
     ? state.pcMonitorTab
@@ -571,6 +580,7 @@ function renderPcDashboardPanel() {
     pagination: elements.pcPendingPagination,
     pageKey: "pcPendingPage",
     selectedDate,
+    view: "pending",
     showFollowUp: true,
   });
   renderPcEmployeeBoard(buckets.notCompleted, {
@@ -579,6 +589,7 @@ function renderPcDashboardPanel() {
     pagination: elements.pcNotCompletedPagination,
     pageKey: "pcNotCompletedPage",
     selectedDate,
+    view: "notcompleted",
     showFollowUp: true,
   });
   renderPcEmployeeBoard(buckets.completed, {
@@ -587,6 +598,7 @@ function renderPcDashboardPanel() {
     pagination: elements.pcCompletedPagination,
     pageKey: "pcCompletedPage",
     selectedDate,
+    view: "completed",
     showFollowUp: false,
   });
 
