@@ -759,7 +759,7 @@ const CHECKLIST_TEMPLATES = {
         label: "Upload supporting files if needed.",
         labelHindi: "यदि आवश्यक हो तो सहायक फ़ाइलें अपलोड करें।",
         type: "file",
-        hint: "Upload up to 10 supported files. Max 100 MB per file.",
+        hint: "Upload up to 10 supported files. Max 3 MB per file — photos are compressed automatically.",
       },
     ],
   },
@@ -1418,7 +1418,7 @@ const CHECKLIST_TEMPLATES = {
         id: "mo1_screenshot",
         label: "Screenshot of customer of MO1?",
         type: "file",
-        hint: "Upload up to 10 supported files. Max 100 MB per file.",
+        hint: "Upload up to 10 supported files. Max 3 MB per file — photos are compressed automatically.",
       },
       {
         id: "mo1_cctv_walkins",
@@ -1434,7 +1434,7 @@ const CHECKLIST_TEMPLATES = {
         id: "mo2_screenshot",
         label: "Screenshot of customer of MO2?",
         type: "file",
-        hint: "Upload up to 10 supported files. Max 100 MB per file.",
+        hint: "Upload up to 10 supported files. Max 3 MB per file — photos are compressed automatically.",
       },
       {
         id: "mo2_cctv_walkins",
@@ -1461,11 +1461,13 @@ const CHECKLIST_TEMPLATES = {
 const SITE_VISIT_COUNT = 10;
 const SITE_VISIT_TITLE = "SITE VISIT CHECKLIST";
 
-// The real "Construction Site Visit" intake form (Google Apps Script). It's
-// a general blank form (FSR name + site address entered fresh each visit,
+// The real "Construction Site Visit" intake form (Google Apps Script).
+// Each link includes a signed motrackContext so its completed visit can be
+// recorded automatically when the form calls back to MoTrack after saving.
 // no per-record editing), so every visit link opens the same URL — MoTrack
 // just marks that visit done locally since it can't see the form's own
 // submissions.
+// The signed callback above is the source of truth for completion status.
 const CONSTRUCTION_SITE_FORM_URL =
   "https://script.google.com/a/macros/modesigns.in/s/AKfycbyVVDKB2D89vv5xXXWGcBfFThyyzbpi03kLqaZkX9CKjunxsdyU1aaYQSRkyt8G5l6x/exec";
 
@@ -1622,6 +1624,8 @@ const state = {
   vehicleAssignmentRequests: {},
   vehicleChangeRequests: [],
   vehicleAllocations: {},
+  vehicleRequestFormOpen: false,
+  vehicleRequestDraft: "",
   companyVehicles: [],
   companyVehicleWarnings: [],
   sheetLeaves: [],

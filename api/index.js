@@ -41,6 +41,7 @@ const FIRESTORE_STORE_COLLECTION = "motrack_store";
 const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
 const MAX_CHECKLIST_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 const RETIRED_LOGIN_EMAILS = new Set(["ups021980@gmail.com"]);
+const SITE_VISIT_COUNT = 10;
 
 const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests", "vehicleChangeRequests", "vehicleAllocations"];
 const STORE_DEFAULTS = {
@@ -791,9 +792,43 @@ function normalizeEmail(value) {
 }
 
 function isHrApprover(user) {
-  const role = String(user?.role || "").toLowerCase();
-  const designation = String(user?.designation || "").toLowerCase();
-  return role === "admin" || role === "hr" || designation.includes("hr");
+  return normalizeEmail(user?.email) === "kamal@modesigns.in";
+}
+
+// The workflow runs installer -> Kamal (allocates the vehicle) -> Dilip
+// (releases the cash) -> back to the installer, who collects the vehicle.
+const VEHICLE_REQUEST_OPEN_STATUSES = ["pending_allocation", "pending_cash"];
+
+// An earlier version ran the two desks the other way round, so requests
+// already in the store carry the old status names. Both of those mean nobody
+// has allocated a vehicle under the current rules, so they land back with Kamal
+// rather than being stranded in a status no panel renders.
+function normalizeVehicleRequestStatus(status) {
+  const value = String(status || "").trim();
+  if (value === "pending_cashier" || value === "pending_hr") {
+    return "pending_allocation";
+  }
+  return value;
+}
+
+// A stale board (or a double click) retries a step the request has already
+// moved past. Naming the stage it actually reached beats a blanket refusal.
+function describeVehicleStageConflict(status, expected) {
+  if (status === "pending_allocation") {
+    return "This request is still waiting for Kamal to allocate a vehicle.";
+  }
+  if (status === "pending_cash") {
+    return expected === "pending_allocation"
+      ? "This request has already been allocated and is now with Dilip for the cash."
+      : "This request is still waiting for Dilip to release the cash.";
+  }
+  if (status === "allotted") {
+    return "This request is already complete - the vehicle has been handed over.";
+  }
+  if (status === "rejected") {
+    return "This request was already rejected.";
+  }
+  return "This request cannot be updated at this stage.";
 }
 
 async function getSessionUser(request) {
@@ -857,10 +892,12 @@ async function handleVehicleChangeRequestCreate(request, response) {
 
   const requests = await readStoreValueAsync("vehicleChangeRequests");
   const hasPendingRequest = requests.some(
-    (entry) => normalizeEmail(entry.employeeEmail) === normalizeEmail(user.email) && entry.status === "pending_hr"
+    (entry) =>
+      normalizeEmail(entry.employeeEmail) === normalizeEmail(user.email) &&
+      VEHICLE_REQUEST_OPEN_STATUSES.includes(normalizeVehicleRequestStatus(entry.status))
   );
   if (hasPendingRequest) {
-    sendJson(response, 409, { ok: false, error: "Your vehicle-change request is already awaiting HR approval." });
+    sendJson(response, 409, { ok: false, error: "Your vehicle-change request is already in progress." });
     return;
   }
 
@@ -879,7 +916,7 @@ async function handleVehicleChangeRequestCreate(request, response) {
     currentVehicleNumber: currentVehicle?.vehicleNumber || "",
     currentVehicleType: currentVehicle?.vehicleType || "",
     reason,
-    status: "pending_hr",
+    status: "pending_allocation",
     requestedAt: new Date().toISOString(),
   };
   requests.push(entry);
@@ -887,10 +924,13 @@ async function handleVehicleChangeRequestCreate(request, response) {
   sendJson(response, 200, { ok: true, request: entry, persisted });
 }
 
-async function handleVehicleChangeRequestReview(request, response, requestId) {
+// Kamal picks the vehicle and approves (or rejects). Approving reserves the
+// vehicle straight away so it can't be promised twice while the cash step is
+// still outstanding, then hands the request to Dilip.
+async function handleVehicleChangeRequestAllocate(request, response, requestId) {
   const reviewer = await getSessionUser(request);
   if (!reviewer || !isHrApprover(reviewer)) {
-    sendJson(response, 403, { ok: false, error: "Only HR can review vehicle-change requests." });
+    sendJson(response, 403, { ok: false, error: "Only Kamal can allocate a vehicle for this request." });
     return;
   }
 
@@ -907,48 +947,34 @@ async function handleVehicleChangeRequestReview(request, response, requestId) {
     sendJson(response, 404, { ok: false, error: "Vehicle-change request not found." });
     return;
   }
-  if (entry.status !== "pending_hr") {
-    sendJson(response, 409, { ok: false, error: "This request has already been reviewed." });
+  const allocateStatus = normalizeVehicleRequestStatus(entry.status);
+  if (allocateStatus !== "pending_allocation") {
+    sendJson(response, 409, { ok: false, error: describeVehicleStageConflict(allocateStatus, "pending_allocation") });
     return;
   }
 
-  entry.status = decision === "approved" ? "approved_for_cashier" : "rejected";
   entry.reviewNote = String(payload.note || "").trim();
   entry.reviewedAt = new Date().toISOString();
   entry.reviewedByEmail = reviewer.email;
   entry.reviewedByName = reviewer.name || reviewer.email;
-  const persisted = await writeStoreValueAsync("vehicleChangeRequests", requests);
-  sendJson(response, 200, { ok: true, request: entry, persisted });
-}
 
-async function handleVehicleChangeRequestAllot(request, response, requestId) {
-  const cashier = await getSessionUser(request);
-  if (!cashier || normalizeEmail(cashier.email) !== CASHIER_EMAIL) {
-    sendJson(response, 403, { ok: false, error: "Only Dilip Gupta, the cashier, can allot vehicles." });
+  if (decision === "rejected") {
+    entry.status = "rejected";
+    const persisted = await writeStoreValueAsync("vehicleChangeRequests", requests);
+    sendJson(response, 200, { ok: true, request: entry, persisted });
     return;
   }
 
-  const payload = await parseJsonBody(request);
   const requestedVehicleNumber = String(payload.vehicleNumber || "").trim();
   if (!requestedVehicleNumber) {
-    sendJson(response, 400, { ok: false, error: "Choose a vehicle to allot." });
+    sendJson(response, 409, { ok: false, error: "Choose a vehicle before approving this request." });
     return;
   }
 
-  const [requests, directory, allocations] = await Promise.all([
-    readStoreValueAsync("vehicleChangeRequests"),
-    getLiveVehicleDirectory(),
+  const [allocations, directory] = await Promise.all([
     readStoreValueAsync("vehicleAllocations"),
+    getLiveVehicleDirectory(),
   ]);
-  const entry = requests.find((item) => item.id === requestId);
-  if (!entry) {
-    sendJson(response, 404, { ok: false, error: "Vehicle-change request not found." });
-    return;
-  }
-  if (entry.status !== "approved_for_cashier") {
-    sendJson(response, 409, { ok: false, error: "This request is not ready for vehicle allotment." });
-    return;
-  }
   const vehicle = directory.vehicles.find(
     (item) => item.vehicleNumber.toLowerCase() === requestedVehicleNumber.toLowerCase()
   );
@@ -968,25 +994,187 @@ async function handleVehicleChangeRequestAllot(request, response, requestId) {
     employeeName: entry.employeeName,
     vehicleNumber: vehicle.vehicleNumber,
     vehicleType: vehicle.vehicleType,
-    sourceLabel: "Cashier allocation",
+    sourceLabel: "Kamal-approved allocation",
     assignedAt: new Date().toISOString(),
-    assignedByEmail: cashier.email,
-    assignedByName: cashier.name || cashier.email,
+    assignedByEmail: reviewer.email,
+    assignedByName: reviewer.name || reviewer.email,
   };
 
-  entry.status = "allotted";
+  entry.status = "pending_cash";
   entry.allottedVehicleNumber = vehicle.vehicleNumber;
   entry.allottedVehicleType = vehicle.vehicleType;
+  entry.allottedVehiclePreviousHolder = vehicle.assignedTo?.name || "";
   entry.allottedAt = new Date().toISOString();
-  entry.allottedByEmail = cashier.email;
-  entry.allottedByName = cashier.name || cashier.email;
-  entry.cashierNote = String(payload.note || "").trim();
+  entry.allottedByEmail = reviewer.email;
+  entry.allottedByName = reviewer.name || reviewer.email;
 
-  const [requestsPersisted, allocationsPersisted] = await Promise.all([
+  await Promise.all([
     writeStoreValueAsync("vehicleChangeRequests", requests),
     writeStoreValueAsync("vehicleAllocations", nextAllocations),
   ]);
-  sendJson(response, 200, { ok: true, request: entry, persisted: requestsPersisted && allocationsPersisted });
+  sendJson(response, 200, { ok: true, request: entry, persisted: true });
+}
+
+// Dilip hands over the cash, which closes the request and lets the installer
+// see the vehicle number to collect.
+async function handleVehicleChangeRequestCash(request, response, requestId) {
+  const cashier = await getSessionUser(request);
+  if (!cashier || normalizeEmail(cashier.email) !== CASHIER_EMAIL) {
+    sendJson(response, 403, { ok: false, error: "Only Dilip Gupta, the cashier, can release the cash for this request." });
+    return;
+  }
+
+  const payload = await parseJsonBody(request);
+  const amount = Number(payload.amount);
+  if (!Number.isFinite(amount) || amount < 0) {
+    sendJson(response, 400, { ok: false, error: "Enter the cash amount handed over." });
+    return;
+  }
+
+  const requests = await readStoreValueAsync("vehicleChangeRequests");
+  const entry = requests.find((item) => item.id === requestId);
+  if (!entry) {
+    sendJson(response, 404, { ok: false, error: "Vehicle-change request not found." });
+    return;
+  }
+  const cashStatus = normalizeVehicleRequestStatus(entry.status);
+  if (cashStatus !== "pending_cash") {
+    sendJson(response, 409, { ok: false, error: describeVehicleStageConflict(cashStatus, "pending_cash") });
+    return;
+  }
+
+  entry.status = "allotted";
+  entry.cashAmount = amount;
+  entry.cashierNote = String(payload.note || "").trim();
+  entry.cashReleasedAt = new Date().toISOString();
+  entry.cashReleasedByEmail = cashier.email;
+  entry.cashReleasedByName = cashier.name || cashier.email;
+
+  const persisted = await writeStoreValueAsync("vehicleChangeRequests", requests);
+  sendJson(response, 200, { ok: true, request: entry, persisted });
+}
+
+function createSiteVisitContext(payload) {
+  const serialized = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = crypto.createHmac("sha256", getSessionSecret()).update(serialized).digest("base64url");
+  return `${serialized}.${signature}`;
+}
+
+function readSiteVisitContext(token) {
+  const [serialized, signature] = String(token || "").split(".");
+  if (!serialized || !signature) {
+    return null;
+  }
+  const expected = crypto.createHmac("sha256", getSessionSecret()).update(serialized).digest("base64url");
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(serialized, "base64url").toString("utf8"));
+    return payload && Number(payload.expiresAt) > Date.now() ? payload : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function getSiteVisitCompletionKey(context) {
+  const slotKey = context.occurrenceSlot ? `__${context.occurrenceSlot}` : "";
+  return `${context.taskId}__${context.occurrenceDate}${slotKey}__visit${context.visitNumber}`;
+}
+
+function getSiteVisitParentCompletionKey(context) {
+  const slotKey = context.occurrenceSlot ? `__${context.occurrenceSlot}` : "";
+  return `${context.taskId}__${context.occurrenceDate}${slotKey}`;
+}
+
+function isSiteVisitTaskTitle(title) {
+  const normalized = String(title || "").trim().toLowerCase();
+  return normalized === "site visit" || normalized === "visit the 10 site";
+}
+
+async function handleSiteVisitContextCreate(request, response) {
+  const user = await getSessionUser(request);
+  if (!user) {
+    sendJson(response, 401, { ok: false, error: "Unauthorized. Please sign in again." });
+    return;
+  }
+  const payload = await parseJsonBody(request);
+  const taskId = String(payload.taskId || "").trim();
+  const occurrenceDate = String(payload.occurrenceDate || "").trim();
+  const visitNumber = Number(payload.visitNumber);
+  if (!taskId || !/^\d{4}-\d{2}-\d{2}$/.test(occurrenceDate) || !Number.isInteger(visitNumber) || visitNumber < 1 || visitNumber > SITE_VISIT_COUNT) {
+    sendJson(response, 400, { ok: false, error: "Invalid site visit details." });
+    return;
+  }
+  const tasks = await readStoreValueAsync("tasks");
+  const task = tasks.find((item) => String(item.taskId || item.id || "") === taskId);
+  if (!task || normalizeEmail(task.assigneeEmail) !== normalizeEmail(user.email) || !isSiteVisitTaskTitle(task.title)) {
+    sendJson(response, 403, { ok: false, error: "You are not allowed to submit this site visit." });
+    return;
+  }
+  const context = createSiteVisitContext({
+    taskId,
+    occurrenceDate,
+    occurrenceSlot: payload.occurrenceSlot || null,
+    occurrenceSlotLabel: payload.occurrenceSlotLabel || "",
+    visitNumber,
+    employeeEmail: user.email,
+    employeeName: user.name || user.email,
+    expiresAt: Date.now() + 8 * 60 * 60 * 1000,
+  });
+  sendJson(response, 200, { ok: true, context });
+}
+
+async function handleSiteVisitComplete(request, response) {
+  let payload;
+  try {
+    payload = await parseJsonBody(request);
+  } catch (error) {
+    sendJson(response, 400, { ok: false, error: "Invalid callback payload." });
+    return;
+  }
+  const context = readSiteVisitContext(payload.context);
+  if (!context) {
+    sendJson(response, 401, { ok: false, error: "The site visit link is invalid or has expired." });
+    return;
+  }
+
+  const completions = await readStoreValueAsync("completions");
+  const completionKey = getSiteVisitCompletionKey(context);
+  const submittedAt = new Date().toISOString();
+  completions[completionKey] = {
+    taskId: context.taskId,
+    occurrenceDate: context.occurrenceDate,
+    occurrenceSlot: context.occurrenceSlot,
+    occurrenceSlotLabel: context.occurrenceSlotLabel,
+    visitNumber: context.visitNumber,
+    submittedAt,
+    responses: {
+      openedForm: true,
+      externalSubmissionId: String(payload.externalSubmissionId || "").trim(),
+      externalImageUrl: String(payload.imageUrl || "").trim(),
+    },
+  };
+
+  const visits = {};
+  for (let number = 1; number <= SITE_VISIT_COUNT; number += 1) {
+    const visitKey = getSiteVisitCompletionKey({ ...context, visitNumber: number });
+    visits[number] = completions[visitKey] ? completions[visitKey].responses : null;
+  }
+  if (Object.values(visits).every(Boolean)) {
+    completions[getSiteVisitParentCompletionKey(context)] = {
+      taskId: context.taskId,
+      occurrenceDate: context.occurrenceDate,
+      occurrenceSlot: context.occurrenceSlot,
+      occurrenceSlotLabel: context.occurrenceSlotLabel,
+      submittedAt,
+      responses: { visits },
+      approvalStatus: "pending",
+    };
+  }
+
+  const persisted = await writeStoreValueAsync("completions", completions);
+  sendJson(response, 200, { ok: true, visitNumber: context.visitNumber, persisted });
 }
 
 function getRequestUrl(request) {
@@ -1231,6 +1419,18 @@ async function handler(request, response) {
       return;
     }
 
+    if (pathname === "/api/site-visit-context" && request.method === "POST") {
+      await handleSiteVisitContextCreate(request, response);
+      return;
+    }
+
+    // Called by the Google Apps Script only after its Sheet and Drive writes
+    // succeed. Authentication is the signed, short-lived context in the body.
+    if (pathname === "/api/site-visits/complete" && request.method === "POST") {
+      await handleSiteVisitComplete(request, response);
+      return;
+    }
+
     if (pathname === "/api/vehicle-directory" && request.method === "GET") {
       if (!isAuthorized(request)) {
         sendJson(response, 401, { ok: false, error: "Unauthorized. Please sign in again." });
@@ -1253,13 +1453,13 @@ async function handler(request, response) {
       return;
     }
 
-    const vehicleRequestMatch = pathname.match(/^\/api\/vehicle-change-requests\/([^/]+)\/(review|allot)$/);
+    const vehicleRequestMatch = pathname.match(/^\/api\/vehicle-change-requests\/([^/]+)\/(allocate|cash)$/);
     if (vehicleRequestMatch && request.method === "POST") {
       const [, requestId, action] = vehicleRequestMatch;
-      if (action === "review") {
-        await handleVehicleChangeRequestReview(request, response, requestId);
+      if (action === "allocate") {
+        await handleVehicleChangeRequestAllocate(request, response, requestId);
       } else {
-        await handleVehicleChangeRequestAllot(request, response, requestId);
+        await handleVehicleChangeRequestCash(request, response, requestId);
       }
       return;
     }

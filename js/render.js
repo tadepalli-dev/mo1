@@ -70,53 +70,111 @@ function renderVehicleWorkflowPanel() {
   const ownRequests = requests
     .filter((entry) => String(entry.employeeEmail || "").toLowerCase() === email)
     .sort((left, right) => new Date(right.requestedAt) - new Date(left.requestedAt));
-  const pendingHr = requests.filter((entry) => entry.status === "pending_hr");
-  const approvedForCashier = requests.filter((entry) => entry.status === "approved_for_cashier");
+  const pendingAllocation = requests.filter((entry) => normalizeVehicleRequestStatus(entry.status) === "pending_allocation");
+  const pendingCash = requests.filter((entry) => normalizeVehicleRequestStatus(entry.status) === "pending_cash");
   const isHr = isVehicleHrApprover(user);
   const isCashier = isVehicleCashier(user);
 
   elements.vehicleChangeSection.classList.toggle("hidden", !isHr && !isCashier && !user);
   if (!isHr && !isCashier) {
     elements.vehicleWorkflowTitle.textContent = "Request a vehicle change";
-    elements.vehicleWorkflowMeta.textContent = "Your request goes to HR first. The cashier allots a vehicle after approval.";
-    const hasPending = ownRequests.some((entry) => entry.status === "pending_hr");
+    elements.vehicleWorkflowMeta.textContent = "Kamal allocates the vehicle, then Dilip releases the cash.";
+    const hasPending = ownRequests.some((entry) => isVehicleRequestOpen(entry));
+
+    // Rebuilding the board replaces the textarea, which drops focus and the
+    // caret. The draft survives on state either way, but yanking the cursor
+    // out mid-sentence does not - so leave the board alone while it is in use
+    // and let the next refresh pick the changes up.
+    if (document.activeElement?.closest?.("[data-vehicle-request-reason]")) {
+      return;
+    }
+
     elements.vehicleWorkflowBoard.innerHTML = `
-      <form class="vehicle-request-form" data-vehicle-form="request">
-        <label class="toolbar-field toolbar-field--full">
-          <span>Reason for changing vehicle</span>
-          <textarea name="reason" rows="3" placeholder="Explain why you need a vehicle change" required ${hasPending ? "disabled" : ""}></textarea>
-        </label>
-        <button type="submit" class="button button--primary" ${hasPending ? "disabled" : ""}>${hasPending ? "Request sent to HR" : "Send request to HR"}</button>
-      </form>
+      ${renderInstallerAllocationBanner(ownRequests)}
+      ${renderVehicleRequestForm(hasPending)}
       ${renderVehicleRequestHistory(ownRequests)}
     `;
     return;
   }
 
   if (isHr && !isCashier) {
-    elements.vehicleWorkflowTitle.textContent = "Vehicle-change requests";
-    elements.vehicleWorkflowMeta.textContent = `${pendingHr.length} request${pendingHr.length === 1 ? "" : "s"} awaiting HR approval`;
-    elements.vehicleWorkflowBoard.innerHTML = pendingHr.length
-      ? pendingHr.map((entry) => renderHrVehicleRequestCard(entry)).join("")
-      : '<p class="empty-state">No vehicle-change requests are waiting for HR approval.</p>';
+    elements.vehicleWorkflowTitle.textContent = "Vehicle allocation desk";
+    elements.vehicleWorkflowMeta.textContent = `${state.companyVehicles.length} company vehicle${state.companyVehicles.length === 1 ? "" : "s"} · ${pendingAllocation.length} request${pendingAllocation.length === 1 ? "" : "s"} waiting for allocation`;
+    elements.vehicleWorkflowBoard.innerHTML = `
+      <div class="vehicle-allocation-requests">
+        <h4>Requests waiting for your allocation</h4>
+        ${pendingAllocation.length
+          ? pendingAllocation.map((entry) => renderHrVehicleRequestCard(entry)).join("")
+          : '<p class="empty-state">No vehicle-change requests are waiting for you.</p>'}
+      </div>
+      ${state.companyVehicleWarnings.length ? `<p class="message message--error">${escapeHtml(state.companyVehicleWarnings.join(" "))}</p>` : ""}
+    `;
     return;
   }
 
-  elements.vehicleWorkflowTitle.textContent = "Vehicle allocation desk";
-  elements.vehicleWorkflowMeta.textContent = `${state.companyVehicles.length} company vehicle${state.companyVehicles.length === 1 ? "" : "s"} · ${approvedForCashier.length} approved request${approvedForCashier.length === 1 ? "" : "s"} waiting`;
+  elements.vehicleWorkflowTitle.textContent = "Vehicle cash desk";
+  elements.vehicleWorkflowMeta.textContent = `${pendingCash.length} approved allocation${pendingCash.length === 1 ? "" : "s"} waiting for cash`;
   elements.vehicleWorkflowBoard.innerHTML = `
     <div class="vehicle-allocation-requests">
-      <h4>Approved requests ready to allot</h4>
-      ${approvedForCashier.length
-        ? approvedForCashier.map((entry) => renderCashierVehicleRequestCard(entry)).join("")
-        : '<p class="empty-state">No HR-approved vehicle-change requests are waiting.</p>'}
-    </div>
-    <div class="vehicle-directory">
-      <div class="vehicle-directory__heading"><h4>All company vehicles</h4><span>${escapeHtml(String(state.companyVehicles.length))} listed</span></div>
-      ${renderCompanyVehicleTable()}
-      ${state.companyVehicleWarnings.length ? `<p class="message message--error">${escapeHtml(state.companyVehicleWarnings.join(" "))}</p>` : ""}
+      <h4>Vehicles approved by Kamal — cash pending</h4>
+      ${pendingCash.length
+        ? pendingCash.map((entry) => renderCashierVehicleRequestCard(entry)).join("")
+        : '<p class="empty-state">No approved allocations are waiting for cash.</p>'}
     </div>
   `;
+}
+
+
+// The reason box stays out of the way until it is actually wanted - the button
+// opens it. Both the open flag and the half-typed reason live on state because
+// the dashboard rebuilds this markup wholesale every 60 seconds, which would
+// otherwise snap the form shut and wipe the text mid-sentence.
+function renderVehicleRequestForm(hasPending) {
+  if (hasPending) {
+    return `
+      <div class="vehicle-request-form vehicle-request-form--trigger">
+        <button type="button" class="button button--primary button--compact" disabled>Request in progress</button>
+      </div>`;
+  }
+
+  if (!state.vehicleRequestFormOpen) {
+    return `
+      <div class="vehicle-request-form vehicle-request-form--trigger">
+        <button type="button" class="button button--primary button--compact" data-vehicle-request-open>Send vehicle change request</button>
+      </div>`;
+  }
+
+  return `
+    <form class="vehicle-request-form" data-vehicle-form="request">
+      <label class="toolbar-field toolbar-field--full">
+        <span>Reason for changing vehicle</span>
+        <textarea name="reason" rows="3" placeholder="Explain why you need a vehicle change" required data-vehicle-request-reason>${escapeHtml(state.vehicleRequestDraft || "")}</textarea>
+      </label>
+      <div class="vehicle-request-form__actions">
+        <button type="button" class="button button--ghost button--compact" data-vehicle-request-cancel>Cancel</button>
+        <button type="submit" class="button button--primary button--compact">Send vehicle change request</button>
+      </div>
+    </form>`;
+}
+
+
+// The point of the whole workflow, for the installer, is the number on the
+// vehicle they walk out and collect — so it gets its own banner rather than
+// being one more line inside the request history.
+function renderInstallerAllocationBanner(requests) {
+  const allotted = requests.find((entry) => normalizeVehicleRequestStatus(entry.status) === "allotted");
+  if (!allotted || !allotted.allottedVehicleNumber) {
+    return "";
+  }
+  const cash = Number(allotted.cashAmount);
+  return `
+    <div class="vehicle-allocated-banner">
+      <span class="vehicle-allocated-banner__label">You have been allocated a vehicle</span>
+      <strong class="vehicle-allocated-banner__number">${escapeHtml(allotted.allottedVehicleNumber)}</strong>
+      <p>Collect the ${escapeHtml(String(allotted.allottedVehicleType || "vehicle").toLowerCase())} with this number.${
+        Number.isFinite(cash) && cash > 0 ? ` Cash handed over by Dilip: ₹${escapeHtml(String(cash))}.` : ""
+      }</p>
+    </div>`;
 }
 
 
@@ -128,61 +186,82 @@ function renderVehicleRequestHistory(requests) {
     <article class="vehicle-request-card">
       <div><strong>${escapeHtml(getVehicleRequestStatusLabel(entry.status))}</strong><span>${escapeHtml(formatDateTimeValue(entry.requestedAt))}</span></div>
       <p>${escapeHtml(entry.reason || "-")}</p>
-      ${entry.allottedVehicleNumber ? `<p>Allotted: <strong>${escapeHtml(entry.allottedVehicleNumber)}</strong></p>` : ""}
-      ${entry.reviewNote ? `<p>HR note: ${escapeHtml(entry.reviewNote)}</p>` : ""}
+      ${entry.allottedVehicleNumber ? `<p>Allocated: <strong>${escapeHtml(entry.allottedVehicleNumber)}</strong></p>` : ""}
+      ${entry.reviewNote ? `<p>Kamal's note: ${escapeHtml(entry.reviewNote)}</p>` : ""}
+      ${entry.cashierNote ? `<p>Dilip's note: ${escapeHtml(entry.cashierNote)}</p>` : ""}
     </article>`).join("")}</div>`;
 }
 
 
+// Kamal's card — pick the vehicle and approve or reject in the same step.
 function renderHrVehicleRequestCard(entry) {
   return `
     <article class="vehicle-request-card vehicle-request-card--action">
-      <div class="vehicle-request-card__header"><div><strong>${escapeHtml(entry.employeeName)}</strong><span>${escapeHtml(entry.employeeEmail)}</span></div><span class="task-badge task-badge--alert">Awaiting HR</span></div>
+      <div class="vehicle-request-card__header"><div><strong>${escapeHtml(entry.employeeName)}</strong><span>${escapeHtml(entry.employeeEmail)}</span></div><span class="task-badge task-badge--alert">Awaiting allocation</span></div>
       <p>Current vehicle: ${escapeHtml(entry.currentVehicleNumber || "Not recorded")}</p>
       <p>Reason: ${escapeHtml(entry.reason)}</p>
-      <form class="vehicle-review-form" data-vehicle-form="review" data-request-id="${escapeHtml(entry.id)}">
-        <input name="note" placeholder="HR note (optional)" />
-        <button type="submit" name="decision" value="approved" class="button button--primary">Approve for cashier</button>
-        <button type="submit" name="decision" value="rejected" class="button button--secondary">Reject</button>
+      <form class="vehicle-allot-form" data-vehicle-form="allocate" data-request-id="${escapeHtml(entry.id)}">
+        ${renderVehicleSearchPicker(entry.id)}
+        <input name="note" placeholder="Note for Dilip (optional)" />
+        <button type="submit" name="decision" value="approved" class="button button--primary">Approve and send to Dilip</button>
+        <button type="submit" name="decision" value="rejected" class="button button--ghost" formnovalidate>Reject</button>
       </form>
     </article>`;
 }
 
 
-function renderCashierVehicleRequestCard(entry) {
+// A native <select> can't be typed into, and a bare datalist stays hidden until
+// you start typing — so this is a text box over a filtered listbox that opens
+// on focus showing every vehicle, and narrows as Kamal types.
+function renderVehicleSearchPicker(requestId) {
+  const listId = `vehicle-picker-${requestId}`;
   const options = state.companyVehicles.map((vehicle) => {
-    const owner = vehicle.assignedTo?.name ? ` - currently ${vehicle.assignedTo.name}` : " - unassigned";
-    return `<option value="${escapeHtml(vehicle.vehicleNumber)}">${escapeHtml(`${vehicle.vehicleNumber} (${vehicle.vehicleType})${owner}`)}</option>`;
+    const owner = vehicle.assignedTo?.name || "Unassigned";
+    const haystack = `${vehicle.vehicleNumber} ${vehicle.vehicleType} ${owner}`.toLowerCase();
+    return `
+      <li class="vehicle-picker__option" role="option" data-vehicle-number="${escapeHtml(vehicle.vehicleNumber)}" data-search="${escapeHtml(haystack)}">
+        <strong>${escapeHtml(vehicle.vehicleNumber)}</strong>
+        <span>${escapeHtml(vehicle.vehicleType)} · ${escapeHtml(owner)}</span>
+      </li>`;
   }).join("");
+
+  return `
+    <div class="vehicle-picker" data-vehicle-picker>
+      <input class="vehicle-picker__input" name="vehicleNumber" type="text" role="combobox" aria-expanded="false"
+        aria-controls="${escapeHtml(listId)}" aria-autocomplete="list" autocomplete="off"
+        placeholder="Search or pick a vehicle number" required />
+      <ul class="vehicle-picker__list hidden" id="${escapeHtml(listId)}" role="listbox">
+        ${options || '<li class="vehicle-picker__empty">Loading the company vehicle list...</li>'}
+      </ul>
+    </div>`;
+}
+
+
+// Dilip's card — the vehicle is already decided, he only records the cash.
+function renderCashierVehicleRequestCard(entry) {
   return `
     <article class="vehicle-request-card vehicle-request-card--action">
-      <div class="vehicle-request-card__header"><div><strong>${escapeHtml(entry.employeeName)}</strong><span>${escapeHtml(entry.employeeEmail)}</span></div><span class="task-badge">HR approved</span></div>
-      <p>Current vehicle: ${escapeHtml(entry.currentVehicleNumber || "Not recorded")} · Reason: ${escapeHtml(entry.reason)}</p>
-      <form class="vehicle-allot-form" data-vehicle-form="allot" data-request-id="${escapeHtml(entry.id)}">
-        <select name="vehicleNumber" required><option value="">Choose vehicle to allot</option>${options}</select>
-        <input name="note" placeholder="Cashier note (optional)" />
-        <button type="submit" class="button button--primary">Allot vehicle</button>
+      <div class="vehicle-request-card__header"><div><strong>${escapeHtml(entry.employeeName)}</strong><span>${escapeHtml(entry.employeeEmail)}</span></div><span class="task-badge">Cash pending</span></div>
+      <p>Allocated by Kamal: <strong>${escapeHtml(entry.allottedVehicleNumber || "Not recorded")}</strong> (${escapeHtml(entry.allottedVehicleType || "Vehicle type not recorded")})</p>
+      <p>Was with: ${escapeHtml(entry.allottedVehiclePreviousHolder || "Unassigned")} · Previous vehicle: ${escapeHtml(entry.currentVehicleNumber || "Not recorded")}</p>
+      <p>Reason: ${escapeHtml(entry.reason)}</p>
+      ${entry.reviewNote ? `<p>Kamal's note: ${escapeHtml(entry.reviewNote)}</p>` : ""}
+      <form class="vehicle-allot-form" data-vehicle-form="cash" data-request-id="${escapeHtml(entry.id)}">
+        <input name="amount" type="number" min="0" step="1" inputmode="numeric" placeholder="Cash handed over (₹)" required />
+        <input name="note" placeholder="Cash note (optional)" />
+        <button type="submit" class="button button--primary">Cash given — release vehicle</button>
       </form>
     </article>`;
-}
-
-
-function renderCompanyVehicleTable() {
-  if (!state.companyVehicles.length) {
-    return '<p class="empty-state">Loading the company vehicle list...</p>';
-  }
-  return `<div class="vehicle-directory__table-wrap"><table class="vehicle-directory__table"><thead><tr><th>Vehicle</th><th>Type</th><th>Currently assigned to</th></tr></thead><tbody>${state.companyVehicles.map((vehicle) => `
-    <tr><td>${escapeHtml(vehicle.vehicleNumber)}</td><td>${escapeHtml(vehicle.vehicleType)}</td><td>${escapeHtml(vehicle.assignedTo?.name || "Unassigned")}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 
 function getVehicleRequestStatusLabel(status) {
   return {
-    pending_hr: "Awaiting HR approval",
-    approved_for_cashier: "Approved - waiting for cashier",
-    rejected: "Rejected by HR",
-    allotted: "Vehicle allotted",
-  }[status] || "Request submitted";
+    pending_allocation: "Awaiting Kamal's vehicle allocation",
+    pending_cash: "Vehicle allocated - awaiting cash from Dilip",
+    rejected: "Rejected by Kamal",
+    allotted: "Vehicle allotted - ready to collect",
+  }[normalizeVehicleRequestStatus(status)] || "Request submitted";
 }
 
 
@@ -2558,6 +2637,84 @@ function readFileAsBase64(file) {
   });
 }
 
+// Employees photograph slips and meters on phones that produce 3-8 MB images,
+// well past the 3 MB attachment cap, and hit a validation error at submit time
+// with no way to shrink the photo themselves. This re-encodes oversized images
+// the moment they're picked, then re-fires "change" so the OCR, auto-confirm
+// and file-list handlers registered after it work off the compressed files.
+function attachImageCompression(field, wrapper) {
+  const status = document.createElement("p");
+  status.className = "checklist-hint checklist-compress-status hidden";
+  wrapper.append(status);
+
+  // Re-picking files while an earlier batch is still compressing would let the
+  // stale result overwrite the newer selection, so each run claims a token and
+  // drops out if a later pick has already superseded it.
+  let latestSelection = 0;
+
+  field.addEventListener("change", (event) => {
+    // Our own re-dispatch — let it straight through to the other listeners.
+    if (field.dataset.compressionPass === "done") {
+      delete field.dataset.compressionPass;
+      return;
+    }
+
+    const originals = Array.from(field.files || []);
+    if (!originals.length) {
+      status.classList.add("hidden");
+      return;
+    }
+
+    // PDFs and office documents can't be re-encoded here, so a selection with
+    // no images at all should behave exactly as it did before.
+    if (!originals.some(isCompressibleImage)) {
+      status.classList.add("hidden");
+      return;
+    }
+
+    event.stopImmediatePropagation();
+
+    const selection = (latestSelection += 1);
+    status.classList.remove("hidden");
+    status.textContent =
+      originals.length > 1 ? `Compressing ${originals.length} images…` : "Compressing image…";
+
+    (async () => {
+      const compressed = [];
+      let savedBytes = 0;
+
+      for (const original of originals) {
+        let result = original;
+        try {
+          result = await compressImageFile(original);
+        } catch (error) {
+          // An image we can't re-encode still uploads as-is; the size check at
+          // upload time is what reports a genuinely unusable file.
+          result = original;
+        }
+        savedBytes += original.size - result.size;
+        compressed.push(result);
+      }
+
+      if (selection !== latestSelection) {
+        return;
+      }
+
+      const transfer = new DataTransfer();
+      compressed.forEach((file) => transfer.items.add(file));
+      field.dataset.compressionPass = "done";
+      field.files = transfer.files;
+
+      status.textContent =
+        savedBytes > 0
+          ? `Compressed for upload — saved ${formatFileSize(savedBytes)}.`
+          : "Ready to upload — no compression needed.";
+
+      field.dispatchEvent(new Event("change", { bubbles: true }));
+    })();
+  });
+}
+
 // Native file inputs only show a filename, with no way to drop one file out
 // of a multi-file selection — this renders that selection as a removable
 // list, rebuilding field.files via DataTransfer since FileList itself is
@@ -2574,7 +2731,7 @@ function attachRemovableFileList(field, wrapper) {
       item.className = "checklist-file-list__item";
 
       const name = document.createElement("span");
-      name.textContent = file.name;
+      name.textContent = `${file.name} (${formatFileSize(file.size)})`;
       item.append(name);
 
       const actions = document.createElement("div");
@@ -2744,6 +2901,12 @@ function renderChecklistFields(template) {
       }
     }
 
+    // Registered before the OCR / auto-confirm / file-list listeners below so
+    // it can hold them back until the shrunk files are in place — they should
+    // all see the compressed selection, not the multi-megabyte originals.
+    if (question.type === "file" || question.type === "photo") {
+      attachImageCompression(field, wrapper);
+    }
     if ((question.type === "file" || question.type === "photo") && previousNumberQuestion) {
       attachOcrAutofill(field, previousNumberQuestion.field, wrapper, previousNumberQuestion.question.ocrUnitHint);
     }
@@ -3159,7 +3322,7 @@ function renderVisitPicker(task) {
 
   const intro = document.createElement("p");
   intro.className = "pantry-location-picker__label";
-  intro.textContent = "Open the site visit form for each visit, fill it in there, then tick it off here once submitted:";
+  intro.textContent = "Open the site visit form for each visit. Opening the form marks that visit as submitted:";
   elements.checklistFields.append(intro);
 
   const list = document.createElement("div");
@@ -3173,16 +3336,12 @@ function renderVisitPicker(task) {
     if (isDone) {
       row.innerHTML = `
         <span class="visit-row__label">Visit ${visitNumber}</span>
-        <span class="status-badge">Submitted ✓</span>
+        <span class="status-badge">Submitted</span>
       `;
     } else {
       row.innerHTML = `
         <span class="visit-row__label">Visit ${visitNumber}</span>
         <button type="button" class="button button--ghost" data-visit-open="${visitNumber}">Open form ↗</button>
-        <label class="visit-row__confirm">
-          <input type="checkbox" data-visit-confirm="${visitNumber}" />
-          Mark submitted
-        </label>
       `;
     }
     list.append(row);

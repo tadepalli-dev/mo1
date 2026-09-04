@@ -43,6 +43,8 @@ function bindEvents() {
   elements.passwordResetRequestsBoard.addEventListener("click", handlePasswordResetAction);
   elements.vehicleWorkflowBoard?.addEventListener("submit", handleVehicleWorkflowSubmit);
   elements.vehicleWorkflowBoard?.addEventListener("click", handleVehicleWorkflowAction);
+  elements.vehicleWorkflowBoard?.addEventListener("input", handleVehicleRequestDraftInput);
+  bindVehiclePickerEvents(elements.vehicleWorkflowBoard);
   elements.addUserForm.addEventListener("submit", handleAddUser);
   elements.toggleAddUserForm.addEventListener("click", handleToggleAddUserForm);
   elements.pantryAlertsToggle.addEventListener("click", handlePantryAlertsToggle);
@@ -133,6 +135,15 @@ function bindEvents() {
     enforceAllowedView();
     renderDashboard();
     refreshStateFromServer().then(renderDashboard);
+  });
+
+  // The Google site-visit form opens in a separate tab. When the employee
+  // returns here after its successful save, pull the completed visit from the
+  // server and update the open checklist immediately.
+  window.addEventListener("focus", () => {
+    refreshActiveSiteVisitProgress().catch((error) => {
+      console.error("Could not refresh site visit progress.", error);
+    });
   });
 }
 

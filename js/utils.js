@@ -144,6 +144,20 @@ function isKamalPantryTask(task) {
 }
 
 
+function isKamalPrasadamTask(task) {
+  return normalizePersonName(task?.assigneeName) === "kamal"
+    && normalizeTaskTitle(task?.title).includes("distributed the prasadam on tuesday");
+}
+
+
+function getNextTuesdayValue() {
+  const date = new Date(`${todayValue()}T00:00:00`);
+  const daysUntilTuesday = (2 - date.getDay() + 7) % 7;
+  date.setDate(date.getDate() + daysUntilTuesday);
+  return dateToLocalValue(date);
+}
+
+
 function applyTaskScheduleOverrides(task) {
   if (!task) {
     return task;
@@ -157,6 +171,13 @@ function applyTaskScheduleOverrides(task) {
   if (isKamalPantryTask(task)) {
     overrides.frequency = "weekly";
     overrides.displayFrequency = "weekly";
+  }
+  if (isKamalPrasadamTask(task)) {
+    // The old record was created as a daily Thursday task. Anchor every new
+    // occurrence to Tuesday so it never appears on any other weekday.
+    overrides.frequency = "weekly";
+    overrides.displayFrequency = "weekly";
+    overrides.plannedDate = getNextTuesdayValue();
   }
 
   return Object.keys(overrides).length ? { ...task, ...overrides } : task;
@@ -431,13 +452,25 @@ function isAdmin(user) {
 }
 
 function isVehicleHrApprover(user) {
-  const role = normalizeValue(user?.role).toLowerCase();
-  const designation = normalizeValue(user?.designation).toLowerCase();
-  return role === "admin" || role === "hr" || designation.includes("hr");
+  return String(user?.email || "").trim().toLowerCase() === "kamal@modesigns.in";
 }
 
 function isVehicleCashier(user) {
   return String(user?.email || "").trim().toLowerCase() === "dilip.gupta@curtainsandcarpets.com";
+}
+
+// Requests raised before the two desks swapped order carry the old status
+// names; both meant "no vehicle allocated yet", which is now Kamal's step.
+function normalizeVehicleRequestStatus(status) {
+  const value = String(status || "").trim();
+  if (value === "pending_cashier" || value === "pending_hr") {
+    return "pending_allocation";
+  }
+  return value;
+}
+
+function isVehicleRequestOpen(entry) {
+  return ["pending_allocation", "pending_cash"].includes(normalizeVehicleRequestStatus(entry?.status));
 }
 
 
@@ -615,5 +648,171 @@ function setupVoiceInput(button, textarea, statusElement) {
       // start() throws if a recognition session is already active elsewhere
       // in the page — safe to ignore, the existing session keeps running.
     }
+  });
+}
+
+
+// fetch().json() throws a parser error when the server replies with something
+// that isn't JSON at all - the static "Not found" page when a route is missing,
+// an HTML error page from a proxy, or an empty body from a crashed handler.
+// That parser error tells the user nothing, so read the body as text first and
+// turn anything unparseable into a message that names the real problem.
+async function readJsonResponse(response) {
+  const raw = await response.text();
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    if (response.status === 404) {
+      throw new Error(
+        "This action isn't available on the server yet (404). The server is most likely running an older build - restart it and try again."
+      );
+    }
+    const detail = raw.trim().slice(0, 120);
+    throw new Error(
+      `The server returned an unexpected response (${response.status})${detail ? `: ${detail}` : "."}`
+    );
+  }
+}
+
+
+// Phone cameras hand us 3-8 MB JPEGs, well past the 3 MB attachment cap, and
+// employees have no practical way to shrink a photo by hand. Everything below
+// re-encodes an oversized image in the browser before it is ever uploaded.
+const IMAGE_COMPRESSION_TARGET_BYTES = 900 * 1024;
+const IMAGE_COMPRESSION_MAX_DIMENSION = 1920;
+const IMAGE_COMPRESSION_QUALITY_STEPS = [0.82, 0.7, 0.6, 0.5, 0.4];
+
+// GIFs would lose their animation and SVGs have no meaningful pixel size, so
+// neither is worth rasterising — everything else raster we can re-encode.
+function isCompressibleImage(file) {
+  const type = String(file?.type || "").toLowerCase();
+  return type.startsWith("image/") && type !== "image/gif" && type !== "image/svg+xml";
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (size >= 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (size >= 1024) {
+    return `${Math.round(size / 1024)} KB`;
+  }
+  return `${size} B`;
+}
+
+function toJpegFileName(name) {
+  const base = String(name || "photo").replace(/\.[a-z0-9]+$/i, "");
+  return `${base || "photo"}.jpg`;
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+async function decodeImageFile(file) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      // "from-image" applies the EXIF rotation phones record, so portrait
+      // photos don't come out sideways once they're redrawn to a canvas.
+      return await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch (error) {
+      // Older engines reject the options bag outright — retry without it.
+    }
+    try {
+      return await createImageBitmap(file);
+    } catch (error) {
+      // Format the decoder can't handle (HEIC on most browsers) — fall back.
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Could not decode the selected image."));
+    };
+    image.src = objectUrl;
+  });
+}
+
+// Returns a smaller JPEG File, or the original file untouched when it is
+// already small enough, isn't an image, or can't be decoded. Never throws for
+// an undecodable file — an upload that skips compression still beats a
+// checklist that refuses to submit.
+async function compressImageFile(file, options = {}) {
+  const targetBytes = options.targetBytes || IMAGE_COMPRESSION_TARGET_BYTES;
+  const maxDimension = options.maxDimension || IMAGE_COMPRESSION_MAX_DIMENSION;
+
+  if (!file || !isCompressibleImage(file)) {
+    return file;
+  }
+
+  let source;
+  try {
+    source = await decodeImageFile(file);
+  } catch (error) {
+    return file;
+  }
+
+  const width = source.width || source.naturalWidth;
+  const height = source.height || source.naturalHeight;
+  if (!width || !height) {
+    source.close?.();
+    return file;
+  }
+
+  if (file.size <= targetBytes && Math.max(width, height) <= maxDimension) {
+    source.close?.();
+    return file;
+  }
+
+  let scale = Math.min(1, maxDimension / Math.max(width, height));
+  let best = null;
+
+  // Quality alone can't always reach the target for a very large photo, so
+  // each pass that falls short redraws at 70% of the previous size.
+  for (let pass = 0; pass < 3 && !(best && best.size <= targetBytes); pass += 1) {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(width * scale));
+    canvas.height = Math.max(1, Math.round(height * scale));
+
+    const context = canvas.getContext("2d");
+    // JPEG has no alpha channel — flatten onto white so transparent PNG
+    // screenshots don't turn into black rectangles.
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+    for (const quality of IMAGE_COMPRESSION_QUALITY_STEPS) {
+      // eslint-disable-next-line no-await-in-loop
+      const blob = await canvasToBlob(canvas, "image/jpeg", quality);
+      if (!blob) {
+        break;
+      }
+      if (!best || blob.size < best.size) {
+        best = blob;
+      }
+      if (blob.size <= targetBytes) {
+        break;
+      }
+    }
+
+    scale *= 0.7;
+  }
+
+  source.close?.();
+
+  if (!best || best.size >= file.size) {
+    return file;
+  }
+
+  return new File([best], toJpegFileName(file.name), {
+    type: "image/jpeg",
+    lastModified: Date.now(),
   });
 }

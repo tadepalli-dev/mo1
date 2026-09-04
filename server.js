@@ -23,6 +23,7 @@ const SERVICE_ACCOUNT_PATH = path.join(ROOT, "service-account-key.json");
 const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
 const MAX_CHECKLIST_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 const RETIRED_LOGIN_EMAILS = new Set(["ups021980@gmail.com"]);
+const SITE_VISIT_COUNT = 10;
 let clientFormFirestore = null;
 
 // Lazy so a missing service-account-key.json doesn't crash every other
@@ -194,9 +195,43 @@ function getSessionUser(request) {
 }
 
 function isHrApprover(user) {
-  const role = String(user?.role || "").toLowerCase();
-  const designation = String(user?.designation || "").toLowerCase();
-  return role === "admin" || role === "hr" || designation.includes("hr");
+  return normalizeEmail(user?.email) === "kamal@modesigns.in";
+}
+
+// The workflow runs installer -> Kamal (allocates the vehicle) -> Dilip
+// (releases the cash) -> back to the installer, who collects the vehicle.
+const VEHICLE_REQUEST_OPEN_STATUSES = ["pending_allocation", "pending_cash"];
+
+// An earlier version ran the two desks the other way round, so requests
+// already in the store carry the old status names. Both of those mean nobody
+// has allocated a vehicle under the current rules, so they land back with Kamal
+// rather than being stranded in a status no panel renders.
+function normalizeVehicleRequestStatus(status) {
+  const value = String(status || "").trim();
+  if (value === "pending_cashier" || value === "pending_hr") {
+    return "pending_allocation";
+  }
+  return value;
+}
+
+// A stale board (or a double click) retries a step the request has already
+// moved past. Naming the stage it actually reached beats a blanket refusal.
+function describeVehicleStageConflict(status, expected) {
+  if (status === "pending_allocation") {
+    return "This request is still waiting for Kamal to allocate a vehicle.";
+  }
+  if (status === "pending_cash") {
+    return expected === "pending_allocation"
+      ? "This request has already been allocated and is now with Dilip for the cash."
+      : "This request is still waiting for Dilip to release the cash.";
+  }
+  if (status === "allotted") {
+    return "This request is already complete - the vehicle has been handed over.";
+  }
+  if (status === "rejected") {
+    return "This request was already rejected.";
+  }
+  return "This request cannot be updated at this stage.";
 }
 
 async function getLiveVehicleDirectory() {
@@ -245,6 +280,9 @@ function getOrCreateSheetsFeedSecret() {
   return secret;
 }
 const SHEETS_FEED_SECRET = getOrCreateSheetsFeedSecret();
+// The hosted API uses MOTRACK_SESSION_SECRET. Keeping the local callback
+// signed too prevents an arbitrary browser request from completing a visit.
+const SITE_VISIT_CONTEXT_SECRET = process.env.MOTRACK_SESSION_SECRET || SHEETS_FEED_SECRET;
 
 // Passwords stay server-side so they never leave the backend in /api/store
 // responses, even while login is temporarily bypassing password checks.
@@ -584,6 +622,149 @@ function parseJsonBody(request, maxBytes = 1024 * 1024) {
   });
 }
 
+function createSiteVisitContext(payload) {
+  const serialized = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = crypto.createHmac("sha256", SITE_VISIT_CONTEXT_SECRET).update(serialized).digest("base64url");
+  return `${serialized}.${signature}`;
+}
+
+function readSiteVisitContext(token) {
+  const [serialized, signature] = String(token || "").split(".");
+  if (!serialized || !signature) {
+    return null;
+  }
+
+  const expected = crypto.createHmac("sha256", SITE_VISIT_CONTEXT_SECRET).update(serialized).digest("base64url");
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(Buffer.from(serialized, "base64url").toString("utf8"));
+    return payload && Number(payload.expiresAt) > Date.now() ? payload : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function getSiteVisitCompletionKey(context) {
+  const slotKey = context.occurrenceSlot ? `__${context.occurrenceSlot}` : "";
+  return `${context.taskId}__${context.occurrenceDate}${slotKey}__visit${context.visitNumber}`;
+}
+
+function getSiteVisitParentCompletionKey(context) {
+  const slotKey = context.occurrenceSlot ? `__${context.occurrenceSlot}` : "";
+  return `${context.taskId}__${context.occurrenceDate}${slotKey}`;
+}
+
+function isSiteVisitTaskTitle(title) {
+  const normalized = String(title || "").trim().toLowerCase();
+  return normalized === "site visit" || normalized === "visit the 10 site";
+}
+
+function handleSiteVisitContextCreate(request, response) {
+  const user = getSessionUser(request);
+  if (!user) {
+    response.writeHead(401, { "Content-Type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ ok: false, error: "Unauthorized. Please sign in again." }));
+    return;
+  }
+
+  parseJsonBody(request)
+    .then((payload) => {
+      const taskId = String(payload.taskId || "").trim();
+      const occurrenceDate = String(payload.occurrenceDate || "").trim();
+      const visitNumber = Number(payload.visitNumber);
+      if (!taskId || !/^\d{4}-\d{2}-\d{2}$/.test(occurrenceDate) || !Number.isInteger(visitNumber) || visitNumber < 1 || visitNumber > SITE_VISIT_COUNT) {
+        const error = new Error("Invalid site visit details.");
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const task = readStoreValue("tasks").find((item) => String(item.taskId || item.id || "") === taskId);
+      if (!task || normalizeEmail(task.assigneeEmail) !== normalizeEmail(user.email) || !isSiteVisitTaskTitle(task.title)) {
+        const error = new Error("You are not allowed to submit this site visit.");
+        error.statusCode = 403;
+        throw error;
+      }
+
+      return createSiteVisitContext({
+        taskId,
+        occurrenceDate,
+        occurrenceSlot: payload.occurrenceSlot || null,
+        occurrenceSlotLabel: payload.occurrenceSlotLabel || "",
+        visitNumber,
+        employeeEmail: user.email,
+        employeeName: user.name || user.email,
+        expiresAt: Date.now() + 8 * 60 * 60 * 1000,
+      });
+    })
+    .then((context) => {
+      response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: true, context }));
+    })
+    .catch((error) => {
+      response.writeHead(error.statusCode || 400, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: error.message || "Could not prepare the site visit form." }));
+    });
+}
+
+function handleSiteVisitComplete(request, response) {
+  parseJsonBody(request)
+    .then((payload) => {
+      const context = readSiteVisitContext(payload.context);
+      if (!context) {
+        const error = new Error("The site visit link is invalid or has expired.");
+        error.statusCode = 401;
+        throw error;
+      }
+
+      const completions = readStoreValue("completions");
+      const submittedAt = new Date().toISOString();
+      completions[getSiteVisitCompletionKey(context)] = {
+        taskId: context.taskId,
+        occurrenceDate: context.occurrenceDate,
+        occurrenceSlot: context.occurrenceSlot,
+        occurrenceSlotLabel: context.occurrenceSlotLabel,
+        visitNumber: context.visitNumber,
+        submittedAt,
+        responses: {
+          openedForm: true,
+          externalSubmissionId: String(payload.externalSubmissionId || "").trim(),
+          externalImageUrl: String(payload.imageUrl || "").trim(),
+        },
+      };
+
+      const visits = {};
+      for (let number = 1; number <= SITE_VISIT_COUNT; number += 1) {
+        const visitKey = getSiteVisitCompletionKey({ ...context, visitNumber: number });
+        visits[number] = completions[visitKey] ? completions[visitKey].responses : null;
+      }
+      if (Object.values(visits).every(Boolean)) {
+        completions[getSiteVisitParentCompletionKey(context)] = {
+          taskId: context.taskId,
+          occurrenceDate: context.occurrenceDate,
+          occurrenceSlot: context.occurrenceSlot,
+          occurrenceSlotLabel: context.occurrenceSlotLabel,
+          submittedAt,
+          responses: { visits },
+          approvalStatus: "pending",
+        };
+      }
+
+      writeStoreValue("completions", completions);
+      return context.visitNumber;
+    })
+    .then((visitNumber) => {
+      response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: true, visitNumber, persisted: true }));
+    })
+    .catch((error) => {
+      response.writeHead(error.statusCode || 400, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, error: error.message || "Could not complete the site visit." }));
+    });
+}
+
 function safeAttachmentName(value) {
   return String(value || "attachment")
     .replace(/[^a-zA-Z0-9._-]/g, "-")
@@ -910,6 +1091,20 @@ const server = http.createServer((request, response) => {
     return;
   }
 
+  if (request.url === "/api/site-visit-context" && request.method === "POST") {
+    setCorsHeaders(response, request);
+    handleSiteVisitContextCreate(request, response);
+    return;
+  }
+
+  // The external site-visit form calls this only after it has saved the form.
+  // Its signed context identifies the task and the one visit being completed.
+  if (request.url === "/api/site-visits/complete" && request.method === "POST") {
+    setCorsHeaders(response, request);
+    handleSiteVisitComplete(request, response);
+    return;
+  }
+
   if (request.url === "/api/checklist-attachments" && request.method === "POST") {
     setCorsHeaders(response, request);
     uploadChecklistAttachment(request, response).catch((error) => {
@@ -1052,8 +1247,8 @@ const server = http.createServer((request, response) => {
           throw new Error("Please enter a reason for the vehicle change.");
         }
         const requests = readStoreValue("vehicleChangeRequests");
-        if (requests.some((entry) => normalizeEmail(entry.employeeEmail) === normalizeEmail(user.email) && entry.status === "pending_hr")) {
-          const error = new Error("Your vehicle-change request is already awaiting HR approval.");
+        if (requests.some((entry) => normalizeEmail(entry.employeeEmail) === normalizeEmail(user.email) && VEHICLE_REQUEST_OPEN_STATUSES.includes(normalizeVehicleRequestStatus(entry.status)))) {
+          const error = new Error("Your vehicle-change request is already in progress.");
           error.statusCode = 409;
           throw error;
         }
@@ -1069,7 +1264,7 @@ const server = http.createServer((request, response) => {
         const entry = {
           id: crypto.randomUUID(), employeeEmail: user.email, employeeName: user.name || user.email,
           currentVehicleNumber: currentVehicle?.vehicleNumber || "", currentVehicleType: currentVehicle?.vehicleType || "",
-          reason, status: "pending_hr", requestedAt: new Date().toISOString(),
+          reason, status: "pending_allocation", requestedAt: new Date().toISOString(),
         };
         requests.push(entry);
         writeStoreValue("vehicleChangeRequests", requests);
@@ -1086,7 +1281,7 @@ const server = http.createServer((request, response) => {
     return;
   }
 
-  const vehicleRequestMatch = request.url.match(/^\/api\/vehicle-change-requests\/([^/]+)\/(review|allot)$/);
+  const vehicleRequestMatch = request.url.match(/^\/api\/vehicle-change-requests\/([^/]+)\/(allocate|cash)$/);
   if (vehicleRequestMatch && request.method === "POST") {
     setCorsHeaders(response, request);
     const [, requestId, action] = vehicleRequestMatch;
@@ -1105,59 +1300,91 @@ const server = http.createServer((request, response) => {
           error.statusCode = 404;
           throw error;
         }
-        if (action === "review") {
+        const status = normalizeVehicleRequestStatus(entry.status);
+
+        if (action === "allocate") {
           if (!isHrApprover(user)) {
-            const error = new Error("Only HR can review vehicle-change requests.");
+            const error = new Error("Only Kamal can allocate a vehicle for this request.");
             error.statusCode = 403;
             throw error;
           }
-          const decision = String(payload.decision || "").toLowerCase();
-          if (!["approved", "rejected"].includes(decision) || entry.status !== "pending_hr") {
-            const error = new Error("This request cannot be reviewed now.");
+          if (status !== "pending_allocation") {
+            const error = new Error(describeVehicleStageConflict(status, "pending_allocation"));
             error.statusCode = 409;
             throw error;
           }
-          entry.status = decision === "approved" ? "approved_for_cashier" : "rejected";
+          const decision = String(payload.decision || "").toLowerCase();
+          if (!["approved", "rejected"].includes(decision)) {
+            throw new Error("Choose approve or reject.");
+          }
+
           entry.reviewNote = String(payload.note || "").trim();
           entry.reviewedAt = new Date().toISOString();
           entry.reviewedByEmail = user.email;
           entry.reviewedByName = user.name || user.email;
+
+          if (decision === "rejected") {
+            entry.status = "rejected";
+            writeStoreValue("vehicleChangeRequests", requests);
+            return entry;
+          }
+
+          const requestedVehicleNumber = String(payload.vehicleNumber || "").trim();
+          if (!requestedVehicleNumber) {
+            const error = new Error("Choose a vehicle before approving this request.");
+            error.statusCode = 409;
+            throw error;
+          }
+          const directory = await getLiveVehicleDirectory();
+          const vehicle = directory.vehicles.find((item) => item.vehicleNumber.toLowerCase() === requestedVehicleNumber.toLowerCase());
+          if (!vehicle) {
+            throw new Error("The selected vehicle is not in the company vehicle list.");
+          }
+
+          // Reserved the moment Kamal approves, so the same vehicle can't be
+          // promised to a second installer while the cash step is outstanding.
+          const allocations = { ...(readStoreValue("vehicleAllocations") || {}) };
+          Object.keys(allocations).forEach((email) => {
+            if (String(allocations[email]?.vehicleNumber || "").toLowerCase() === vehicle.vehicleNumber.toLowerCase()) delete allocations[email];
+          });
+          allocations[normalizeEmail(entry.employeeEmail)] = {
+            employeeEmail: entry.employeeEmail, employeeName: entry.employeeName, vehicleNumber: vehicle.vehicleNumber,
+            vehicleType: vehicle.vehicleType, sourceLabel: "Kamal-approved allocation", assignedAt: new Date().toISOString(),
+            assignedByEmail: user.email, assignedByName: user.name || user.email,
+          };
+
+          entry.status = "pending_cash";
+          entry.allottedVehicleNumber = vehicle.vehicleNumber;
+          entry.allottedVehicleType = vehicle.vehicleType;
+          entry.allottedVehiclePreviousHolder = vehicle.assignedTo?.name || "";
+          entry.allottedAt = new Date().toISOString();
+          entry.allottedByEmail = user.email;
+          entry.allottedByName = user.name || user.email;
+          writeStoreValue("vehicleAllocations", allocations);
           writeStoreValue("vehicleChangeRequests", requests);
           return entry;
         }
+
         if (normalizeEmail(user.email) !== CASHIER_EMAIL) {
-          const error = new Error("Only Dilip Gupta, the cashier, can allot vehicles.");
+          const error = new Error("Only Dilip Gupta, the cashier, can release the cash for this request.");
           error.statusCode = 403;
           throw error;
         }
-        if (entry.status !== "approved_for_cashier") {
-          const error = new Error("This request is not ready for vehicle allotment.");
+        if (status !== "pending_cash") {
+          const error = new Error(describeVehicleStageConflict(status, "pending_cash"));
           error.statusCode = 409;
           throw error;
         }
-        const vehicleNumber = String(payload.vehicleNumber || "").trim();
-        const directory = await getLiveVehicleDirectory();
-        const vehicle = directory.vehicles.find((item) => item.vehicleNumber.toLowerCase() === vehicleNumber.toLowerCase());
-        if (!vehicle) {
-          throw new Error("The selected vehicle is not in the company vehicle list.");
+        const amount = Number(payload.amount);
+        if (!Number.isFinite(amount) || amount < 0) {
+          throw new Error("Enter the cash amount handed over.");
         }
-        const allocations = { ...(readStoreValue("vehicleAllocations") || {}) };
-        Object.keys(allocations).forEach((email) => {
-          if (String(allocations[email]?.vehicleNumber || "").toLowerCase() === vehicle.vehicleNumber.toLowerCase()) delete allocations[email];
-        });
-        allocations[normalizeEmail(entry.employeeEmail)] = {
-          employeeEmail: entry.employeeEmail, employeeName: entry.employeeName, vehicleNumber: vehicle.vehicleNumber,
-          vehicleType: vehicle.vehicleType, sourceLabel: "Cashier allocation", assignedAt: new Date().toISOString(),
-          assignedByEmail: user.email, assignedByName: user.name || user.email,
-        };
         entry.status = "allotted";
-        entry.allottedVehicleNumber = vehicle.vehicleNumber;
-        entry.allottedVehicleType = vehicle.vehicleType;
-        entry.allottedAt = new Date().toISOString();
-        entry.allottedByEmail = user.email;
-        entry.allottedByName = user.name || user.email;
+        entry.cashAmount = amount;
         entry.cashierNote = String(payload.note || "").trim();
-        writeStoreValue("vehicleAllocations", allocations);
+        entry.cashReleasedAt = new Date().toISOString();
+        entry.cashReleasedByEmail = user.email;
+        entry.cashReleasedByName = user.name || user.email;
         writeStoreValue("vehicleChangeRequests", requests);
         return entry;
       })
@@ -1404,9 +1631,25 @@ const server = http.createServer((request, response) => {
     }
 
     const extension = path.extname(filePath).toLowerCase();
-    response.writeHead(200, {
-      "Content-Type": MIME_TYPES[extension] || "application/octet-stream",
-    });
+    const headers = { "Content-Type": MIME_TYPES[extension] || "application/octet-stream" };
+
+    // The app's own markup, scripts and styles carried no cache headers, so
+    // browsers fell back to heuristic caching and kept running a stale bundle
+    // long after the files on disk had changed. "no-cache" forces a
+    // revalidation on every load, and the ETag keeps that to a cheap 304 when
+    // nothing has actually moved.
+    if ([".html", ".js", ".css"].includes(extension)) {
+      const etag = `"${crypto.createHash("sha1").update(file).digest("hex")}"`;
+      headers["Cache-Control"] = "no-cache";
+      headers.ETag = etag;
+      if (request.headers["if-none-match"] === etag) {
+        response.writeHead(304, headers);
+        response.end();
+        return;
+      }
+    }
+
+    response.writeHead(200, headers);
     response.end(file);
   });
 });

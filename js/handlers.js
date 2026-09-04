@@ -90,20 +90,55 @@ async function handleVehicleWorkflowSubmit(event) {
   if (formType === "request") {
     url = "/api/vehicle-change-requests";
     payload = { reason: String(body.get("reason") || "").trim() };
-  } else if (formType === "review") {
-    url = `/api/vehicle-change-requests/${encodeURIComponent(requestId)}/review`;
+  } else if (formType === "allocate") {
+    const decision = submitter?.value === "rejected" ? "rejected" : "approved";
+    // The picker holds the raw vehicle number, but a rejection needs no vehicle
+    // at all — the server only insists on one when the decision is "approved".
+    url = `/api/vehicle-change-requests/${encodeURIComponent(requestId)}/allocate`;
     payload = {
-      decision: submitter?.value,
+      decision,
+      vehicleNumber: String(body.get("vehicleNumber") || "").split(" | ")[0].trim(),
       note: String(body.get("note") || "").trim(),
     };
-  } else if (formType === "allot") {
-    url = `/api/vehicle-change-requests/${encodeURIComponent(requestId)}/allot`;
+    if (decision === "approved" && !payload.vehicleNumber) {
+      window.alert("Choose a vehicle before approving this request.");
+      return;
+    }
+  } else if (formType === "cash") {
+    url = `/api/vehicle-change-requests/${encodeURIComponent(requestId)}/cash`;
     payload = {
-      vehicleNumber: String(body.get("vehicleNumber") || "").trim(),
+      amount: Number(body.get("amount")),
       note: String(body.get("note") || "").trim(),
     };
   } else {
     return;
+  }
+
+  // The vehicle-directory lookup behind an allocation can take a few seconds.
+  // Without this the buttons stay live throughout, and an impatient second
+  // click arrives after the first has already advanced the request - which
+  // came back as a confusing "not waiting for a vehicle allocation" error.
+  if (form.dataset.submitting === "true") {
+    return;
+  }
+  const buttons = [...form.querySelectorAll("button")];
+  const restoreButtons = () => {
+    delete form.dataset.submitting;
+    buttons.forEach((button) => {
+      button.disabled = false;
+      if (button.dataset.idleLabel != null) {
+        button.textContent = button.dataset.idleLabel;
+        delete button.dataset.idleLabel;
+      }
+    });
+  };
+  form.dataset.submitting = "true";
+  buttons.forEach((button) => {
+    button.disabled = true;
+  });
+  if (submitter) {
+    submitter.dataset.idleLabel = submitter.textContent;
+    submitter.textContent = "Working...";
   }
 
   try {
@@ -112,25 +147,148 @@ async function handleVehicleWorkflowSubmit(event) {
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
-    const result = await response.json();
     if (response.status === 401) {
       handleUnauthorized();
       return;
     }
+    const result = await readJsonResponse(response);
     if (!response.ok || !result.ok) {
       throw new Error(result.error || "Could not save the vehicle workflow update.");
     }
+    if (formType === "request") {
+      state.vehicleRequestFormOpen = false;
+      state.vehicleRequestDraft = "";
+    }
     await Promise.all([refreshStateFromServer(), loadCompanyVehicles()]);
+    // renderDashboard() replaces this form wholesale, so there is nothing left
+    // to re-enable on the success path.
     renderDashboard();
   } catch (error) {
+    restoreButtons();
     window.alert(error.message || "Could not save the vehicle workflow update.");
   }
 }
 
 
-function handleVehicleWorkflowAction() {
-  // Form submission carries all vehicle workflow actions. This listener keeps
-  // the board extensible without adding document-level click handlers.
+function handleVehicleWorkflowAction(event) {
+  if (event.target.closest("[data-vehicle-request-open]")) {
+    state.vehicleRequestFormOpen = true;
+    renderVehicleWorkflowPanel();
+    elements.vehicleWorkflowBoard.querySelector("[data-vehicle-request-reason]")?.focus();
+    return;
+  }
+
+  if (event.target.closest("[data-vehicle-request-cancel]")) {
+    state.vehicleRequestFormOpen = false;
+    state.vehicleRequestDraft = "";
+    renderVehicleWorkflowPanel();
+  }
+}
+
+
+// The 60-second dashboard refresh re-renders the board from scratch, so the
+// reason has to be mirrored onto state as it is typed or it would be lost.
+function handleVehicleRequestDraftInput(event) {
+  const reason = event.target.closest("[data-vehicle-request-reason]");
+  if (reason) {
+    state.vehicleRequestDraft = reason.value;
+  }
+}
+
+
+// The allocation board is rebuilt with innerHTML on every refresh, so the
+// searchable vehicle dropdown is driven by delegation on the board itself
+// rather than listeners bound to elements that are about to be replaced.
+function bindVehiclePickerEvents(board) {
+  if (!board) {
+    return;
+  }
+
+  const closeAllPickers = (except) => {
+    board.querySelectorAll("[data-vehicle-picker]").forEach((picker) => {
+      if (picker === except) {
+        return;
+      }
+      picker.querySelector(".vehicle-picker__list")?.classList.add("hidden");
+      picker.querySelector(".vehicle-picker__input")?.setAttribute("aria-expanded", "false");
+    });
+  };
+
+  const filterPicker = (picker) => {
+    const input = picker.querySelector(".vehicle-picker__input");
+    const list = picker.querySelector(".vehicle-picker__list");
+    const term = String(input?.value || "").trim().toLowerCase();
+    let visible = 0;
+    picker.querySelectorAll(".vehicle-picker__option").forEach((option) => {
+      const matches = !term || String(option.dataset.search || "").includes(term);
+      option.classList.toggle("hidden", !matches);
+      if (matches) {
+        visible += 1;
+      }
+    });
+    let emptyRow = list.querySelector(".vehicle-picker__empty--no-match");
+    if (!visible) {
+      if (!emptyRow) {
+        emptyRow = document.createElement("li");
+        emptyRow.className = "vehicle-picker__empty vehicle-picker__empty--no-match";
+        list.append(emptyRow);
+      }
+      emptyRow.textContent = `No vehicle matches "${input.value}".`;
+      emptyRow.classList.remove("hidden");
+    } else if (emptyRow) {
+      emptyRow.classList.add("hidden");
+    }
+  };
+
+  const openPicker = (picker) => {
+    closeAllPickers(picker);
+    filterPicker(picker);
+    picker.querySelector(".vehicle-picker__list")?.classList.remove("hidden");
+    picker.querySelector(".vehicle-picker__input")?.setAttribute("aria-expanded", "true");
+  };
+
+  board.addEventListener("focusin", (event) => {
+    const input = event.target.closest(".vehicle-picker__input");
+    if (input) {
+      openPicker(input.closest("[data-vehicle-picker]"));
+      return;
+    }
+    closeAllPickers(null);
+  });
+
+  board.addEventListener("input", (event) => {
+    const input = event.target.closest(".vehicle-picker__input");
+    if (input) {
+      openPicker(input.closest("[data-vehicle-picker]"));
+    }
+  });
+
+  // mousedown fires before the input's blur, so the option is still on screen
+  // when the selection is read.
+  board.addEventListener("mousedown", (event) => {
+    const option = event.target.closest(".vehicle-picker__option");
+    if (!option) {
+      return;
+    }
+    event.preventDefault();
+    const picker = option.closest("[data-vehicle-picker]");
+    const input = picker.querySelector(".vehicle-picker__input");
+    input.value = option.dataset.vehicleNumber || "";
+    picker.querySelector(".vehicle-picker__list")?.classList.add("hidden");
+    input.setAttribute("aria-expanded", "false");
+  });
+
+  board.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && event.target.closest(".vehicle-picker__input")) {
+      closeAllPickers(null);
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("[data-vehicle-picker]")) {
+      closeAllPickers(null);
+    }
+  });
 }
 
 
@@ -646,17 +804,16 @@ async function handleResyncSubmissionReport() {
 }
 
 
-// Opening the form is a separate, repeatable action from marking a visit
-// done — MoTrack can't see whether the Google form was actually submitted,
-// so completion is a deliberate manual confirmation (the checkbox), not
-// something that happens automatically just from opening the link.
 function handleVisitOpenClick(visitNumber) {
-  window.open(CONSTRUCTION_SITE_FORM_URL, "_blank", "noopener");
-}
-
-
-function handleVisitConfirmChange(visitNumber) {
   const task = state.activeChecklistTask;
+  if (!task) {
+    return;
+  }
+
+  window.open(CONSTRUCTION_SITE_FORM_URL, "_blank", "noopener");
+
+  // Opening the form is the operational confirmation for a site visit. Keep
+  // that progress in MoTrack immediately; the linked form remains its detail record.
   const submittedAt = new Date().toISOString();
   state.completions[getVisitCompletionKey(task, visitNumber)] = {
     taskId: task.taskId || task.id,
@@ -664,18 +821,18 @@ function handleVisitConfirmChange(visitNumber) {
     occurrenceSlot: task.occurrenceSlot || null,
     occurrenceSlotLabel: task.occurrenceSlotLabel || "",
     visitNumber,
+    openedForm: true,
     submittedAt,
-    responses: { openedForm: true, formUrl: CONSTRUCTION_SITE_FORM_URL },
+    responses: { visit_number: visitNumber },
   };
 
   const visits = {};
   for (let number = 1; number <= SITE_VISIT_COUNT; number++) {
-    const visitCompletion = state.completions[getVisitCompletionKey(task, number)];
-    visits[number] = visitCompletion ? visitCompletion.responses : null;
+    const completion = state.completions[getVisitCompletionKey(task, number)];
+    visits[number] = completion ? completion.responses : null;
   }
-  const allVisitsDone = Object.values(visits).every(Boolean);
 
-  if (allVisitsDone) {
+  if (Object.values(visits).every(Boolean)) {
     state.completions[getCompletionKey(task)] = {
       taskId: task.taskId || task.id,
       occurrenceDate: task.occurrenceDate,
@@ -691,10 +848,23 @@ function handleVisitConfirmChange(visitNumber) {
   syncSubmissionReport();
   renderEmployeeTaskBoard();
   renderApprovalsPage();
+  renderVisitPicker(task);
+  setStatusMessage(elements.checklistMessage, `Visit ${visitNumber} marked submitted.`, "success");
+}
 
-  if (allVisitsDone) {
-    closeChecklistModal();
-  } else {
+async function refreshActiveSiteVisitProgress() {
+  const task = state.activeChecklistTask;
+  if (!task || !isSiteVisitTask(task)) {
+    return;
+  }
+
+  // Allow a just-opened visit to finish saving before reloading server state.
+  await waitForCompletionsPersistence();
+  await refreshStateFromServer();
+  renderEmployeeTaskBoard();
+  renderApprovalsPage();
+
+  if (!elements.checklistModal.classList.contains("hidden") && state.activeChecklistTask === task) {
     renderVisitPicker(task);
   }
 }
@@ -1081,12 +1251,6 @@ function handleChecklistFieldsClick(event) {
   const visitOpenTrigger = event.target.closest("[data-visit-open]");
   if (visitOpenTrigger) {
     handleVisitOpenClick(Number(visitOpenTrigger.getAttribute("data-visit-open")));
-    return;
-  }
-
-  const visitConfirmTrigger = event.target.closest("[data-visit-confirm]");
-  if (visitConfirmTrigger) {
-    handleVisitConfirmChange(Number(visitConfirmTrigger.getAttribute("data-visit-confirm")));
     return;
   }
 
@@ -1996,11 +2160,26 @@ async function collectChecklistResponses(template) {
 
 async function uploadChecklistAttachment(file) {
   const maxBytes = 3 * 1024 * 1024;
-  if (file.size > maxBytes) {
-    throw new Error(`"${file.name}" is larger than 3 MB. Please upload a smaller file.`);
+
+  // Images are normally shrunk the moment they're picked; this is the backstop
+  // for a checklist submitted before that finished, or for a field rendered
+  // outside the checklist form.
+  let payload = file;
+  if (payload.size > maxBytes && isCompressibleImage(payload)) {
+    try {
+      payload = await compressImageFile(payload);
+    } catch (error) {
+      payload = file;
+    }
   }
 
-  const fileBytes = new Uint8Array(await file.arrayBuffer());
+  if (payload.size > maxBytes) {
+    throw new Error(
+      `"${file.name}" is ${formatFileSize(file.size)}, over the 3 MB limit. Please upload a smaller file.`,
+    );
+  }
+
+  const fileBytes = new Uint8Array(await payload.arrayBuffer());
   let binary = "";
   fileBytes.forEach((byte) => {
     binary += String.fromCharCode(byte);
@@ -2008,7 +2187,7 @@ async function uploadChecklistAttachment(file) {
   const response = await fetch(buildApiUrl("/api/checklist-attachments"), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ name: file.name, type: file.type, data: btoa(binary) }),
+    body: JSON.stringify({ name: payload.name, type: payload.type, data: btoa(binary) }),
   });
   const result = await response.json();
   if (!response.ok || !result.ok) {

@@ -1019,7 +1019,7 @@ function buildDefaultChecklistTemplate(task) {
         label: "Upload supporting files if needed.",
         labelHindi: "यदि आवश्यक हो तो सहायक फ़ाइलें अपलोड करें।",
         type: "file",
-        hint: "Upload up to 10 supported files. Max 100 MB per file.",
+        hint: "Upload up to 10 supported files. Max 3 MB per file — photos are compressed automatically.",
         // Uploading proof already implies "yes, done" — ticking Yes by hand
         // too would be a redundant extra step for the same signal.
         autoConfirmQuestionId: "completion_notes",

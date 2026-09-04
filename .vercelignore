@@ -3,4 +3,5 @@ node_modules
 .git
 .agents
 .claude
-.env*
+.env
+.env.local

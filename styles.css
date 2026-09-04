@@ -1853,6 +1853,110 @@ textarea {
   font-weight: 600;
 }
 
+.vehicle-request-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+.button--compact {
+  padding: 0.55rem 1.1rem;
+  font-size: 0.85rem;
+}
+
+/* Searchable vehicle dropdown on Kamal's allocation desk. */
+.vehicle-picker {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+.vehicle-picker__input {
+  width: 100%;
+}
+
+.vehicle-picker__list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  left: 0;
+  max-height: 15rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--surface, #ffffff);
+  box-shadow: 0 12px 28px rgba(15, 40, 38, 0.16);
+  list-style: none;
+}
+
+.vehicle-picker__option {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm, 0.35rem);
+  cursor: pointer;
+}
+
+.vehicle-picker__option:hover,
+.vehicle-picker__option:focus-visible {
+  background: rgba(31, 107, 99, 0.1);
+}
+
+.vehicle-picker__option strong {
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.vehicle-picker__option span,
+.vehicle-picker__empty {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.vehicle-picker__empty {
+  padding: 0.5rem 0.6rem;
+}
+
+/* The vehicle number the installer needs to walk out and collect. */
+.vehicle-allocated-banner {
+  display: grid;
+  gap: 0.3rem;
+  margin-bottom: 1rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid rgba(31, 107, 99, 0.35);
+  border-radius: var(--radius-md, 0.5rem);
+  background: rgba(31, 107, 99, 0.08);
+}
+
+.vehicle-allocated-banner__label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-dark, rgb(31, 107, 99));
+}
+
+.vehicle-allocated-banner__number {
+  font-size: 1.5rem;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.vehicle-allocated-banner p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.checklist-compress-status {
+  color: rgb(31, 107, 99);
+  font-weight: 600;
+}
+
 .checklist-file-list {
   display: grid;
   gap: 0.4rem;
@@ -2063,7 +2167,6 @@ textarea {
 
 .vehicle-workflow__board,
 .vehicle-allocation-requests,
-.vehicle-directory,
 .vehicle-request-history {
   display: grid;
   gap: 0.85rem;
@@ -2078,6 +2181,16 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 18px;
   background: #fffdf8;
+}
+
+/* Collapsed, this is a single action rather than a form, so it drops the card
+   chrome and shrink-wraps to the right instead of spanning the full width. */
+.vehicle-request-form--trigger {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0;
+  border: 0;
+  background: none;
 }
 
 .vehicle-review-form,
@@ -2103,14 +2216,12 @@ textarea {
 }
 
 .vehicle-request-card__header,
-.vehicle-request-card__header > div,
-.vehicle-directory__heading {
+.vehicle-request-card__header > div {
   display: flex;
   gap: 0.55rem;
 }
 
-.vehicle-request-card__header,
-.vehicle-directory__heading {
+.vehicle-request-card__header {
   justify-content: space-between;
   align-items: flex-start;
 }
@@ -2119,41 +2230,9 @@ textarea {
   flex-direction: column;
 }
 
-.vehicle-request-card__header span:not(.task-badge),
-.vehicle-directory__heading span {
+.vehicle-request-card__header span:not(.task-badge) {
   color: var(--muted);
   font-size: 0.9rem;
-}
-
-.vehicle-directory__table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-}
-
-.vehicle-directory__table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 560px;
-}
-
-.vehicle-directory__table th,
-.vehicle-directory__table td {
-  padding: 0.75rem 0.9rem;
-  text-align: left;
-  border-bottom: 1px solid var(--line);
-}
-
-.vehicle-directory__table th {
-  background: var(--ink);
-  color: #fff;
-  font-size: 0.8rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.vehicle-directory__table tr:last-child td {
-  border-bottom: 0;
 }
 
 @media (max-width: 760px) {
