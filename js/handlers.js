@@ -1977,8 +1977,8 @@ function handleEmployeeStatusSelectChange(event) {
       openClientFormForTask(task);
     }
     openChecklistModal(task);
-  } else if (value === "not_completed") {
-    openNotCompletedModal(task);
+  } else if (isNonCompletionStatus(value)) {
+    openNotCompletedModal(task, value);
   }
 }
 
@@ -2153,11 +2153,22 @@ function closeChecklistModal() {
 }
 
 
-function openNotCompletedModal(task) {
+function openNotCompletedModal(task, status = "not_completed") {
+  const isNotRequired = status === "not_required";
   state.activeNotCompletedTask = task;
+  state.activeNotCompletedStatus = isNotRequired ? "not_required" : "not_completed";
   elements.notCompletedForm.reset();
   elements.notCompletedMessage.textContent = "";
   elements.notCompletedTaskTitle.textContent = getTaskDisplayTitle(task);
+  // The same remark form serves both non-completion routes — only the wording
+  // changes, so a "not required" remark doesn't read as an excuse.
+  elements.notCompletedModalLabel.textContent = getNonCompletionLabel(state.activeNotCompletedStatus);
+  elements.notCompletedPromptLabel.textContent = isNotRequired
+    ? "Why wasn't this required?"
+    : "Why wasn't this completed?";
+  elements.notCompletedRemarks.placeholder = isNotRequired
+    ? "Add a remark explaining why this task wasn't required"
+    : "Add a remark explaining why this task wasn't completed";
   elements.notCompletedModal.classList.remove("hidden");
   elements.notCompletedModal.setAttribute("aria-hidden", "false");
 }
@@ -2165,6 +2176,7 @@ function openNotCompletedModal(task) {
 
 function closeNotCompletedModal() {
   state.activeNotCompletedTask = null;
+  state.activeNotCompletedStatus = "not_completed";
   elements.notCompletedModal.classList.add("hidden");
   elements.notCompletedModal.setAttribute("aria-hidden", "true");
 }
@@ -2192,7 +2204,7 @@ function handleNotCompletedSubmit(event) {
     occurrenceSlot: task.occurrenceSlot || null,
     occurrenceSlotLabel: task.occurrenceSlotLabel || "",
     submittedAt: new Date().toISOString(),
-    status: "not_completed",
+    status: state.activeNotCompletedStatus === "not_required" ? "not_required" : "not_completed",
     remarks,
     approvalStatus: "pending",
   };

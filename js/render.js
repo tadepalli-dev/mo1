@@ -326,10 +326,10 @@ function buildChecklistMonitorSnapshot(selectedDate) {
     submittedEntries,
     notSubmitted,
     completed: submittedEntries.filter(
-      (entry) => entry.completion.approvalStatus !== "approved" && entry.completion.status !== "not_completed"
+      (entry) => entry.completion.approvalStatus !== "approved" && !isNonCompletionStatus(entry.completion.status)
     ),
     notCompleted: submittedEntries.filter(
-      (entry) => entry.completion.approvalStatus !== "approved" && entry.completion.status === "not_completed"
+      (entry) => entry.completion.approvalStatus !== "approved" && isNonCompletionStatus(entry.completion.status)
     ),
     approved: submittedEntries.filter((entry) => entry.completion.approvalStatus === "approved"),
   };
@@ -380,7 +380,7 @@ function buildPcEmployeeBuckets(selectedDate) {
       }
       const group = byEmployee.get(groupKey);
       const completion = completionsByKey.get(getCompletionKey(task)) || null;
-      if (completion && completion.status !== "not_completed") {
+      if (completion && !isNonCompletionStatus(completion.status)) {
         group.done.push({ task, completion });
       } else {
         group.outstanding.push({ task, completion });
@@ -1007,16 +1007,16 @@ function renderApprovalsPage() {
     .sort((left, right) => (left.task.assigneeName || "").localeCompare(right.task.assigneeName || ""));
 
   const completed = submittedEntries.filter(
-    (entry) => entry.completion.approvalStatus !== "approved" && entry.completion.status !== "not_completed"
+    (entry) => entry.completion.approvalStatus !== "approved" && !isNonCompletionStatus(entry.completion.status)
   );
   const notCompleted = submittedEntries.filter(
-    (entry) => entry.completion.approvalStatus !== "approved" && entry.completion.status === "not_completed"
+    (entry) => entry.completion.approvalStatus !== "approved" && isNonCompletionStatus(entry.completion.status)
   );
   const approved = submittedEntries.filter((entry) => entry.completion.approvalStatus === "approved");
 
   elements.approvalsPendingMeta.textContent = `${notSubmitted.length} task${notSubmitted.length === 1 ? "" : "s"} not yet submitted`;
   elements.approvalsCompletedMeta.textContent = `${completed.length} submitted checklist${completed.length === 1 ? "" : "s"} on ${formatDateValue(selectedDate)}`;
-  elements.approvalsNotCompletedMeta.textContent = `${notCompleted.length} "not completed" submission${notCompleted.length === 1 ? "" : "s"} on ${formatDateValue(selectedDate)}`;
+  elements.approvalsNotCompletedMeta.textContent = `${notCompleted.length} "not completed" / "not required" submission${notCompleted.length === 1 ? "" : "s"} on ${formatDateValue(selectedDate)}`;
   elements.approvalsApprovedMeta.textContent = `${approved.length} submission${approved.length === 1 ? "" : "s"} approved`;
   elements.approvalsPendingTabCount.textContent = String(notSubmitted.length);
   elements.approvalsCompletedTabCount.textContent = String(completed.length);
@@ -1177,13 +1177,15 @@ function createSubmissionMetaItem(label, value) {
 
 
 function createSubmissionAnswersMarkup(task, completion) {
-  if (completion.status === "not_completed") {
+  if (isNonCompletionStatus(completion.status)) {
+    const heading =
+      completion.status === "not_required" ? "Why it was not required" : "Why it was not completed";
     return `
       <section class="submission-section">
         <div class="section-heading">
           <div>
             <p class="section-label">Reason</p>
-            <h3>Why it was not completed</h3>
+            <h3>${escapeHtml(heading)}</h3>
           </div>
         </div>
         <div class="submission-answer submission-answer--full">
@@ -1537,8 +1539,8 @@ function getCompletionStatusLabel(completion) {
   if (completion.approvalStatus === "approved") {
     return "Approved";
   }
-  if (completion.status === "not_completed") {
-    return "Not completed";
+  if (isNonCompletionStatus(completion.status)) {
+    return getNonCompletionLabel(completion.status);
   }
   return "Submitted";
 }
@@ -1851,8 +1853,8 @@ function createPcSubmittedGroupRow(entry) {
 
 
 function summarizeCompletion(task, completion) {
-  if (completion.status === "not_completed") {
-    return `Not completed — ${completion.remarks || "no remark given"}`;
+  if (isNonCompletionStatus(completion.status)) {
+    return `${getNonCompletionLabel(completion.status)} — ${completion.remarks || "no remark given"}`;
   }
 
   if (isSiteVisitTask(task) && completion.responses?.visits) {
@@ -3843,8 +3845,9 @@ function createAdminTaskCard(group) {
 
 
 function createCompletionStatusBadge(completion) {
-  if (completion.status === "not_completed") {
-    return `<span class="status-badge status-badge--alert" title="${escapeHtml(completion.remarks || "")}">Not completed</span>`;
+  if (isNonCompletionStatus(completion.status)) {
+    const modifier = completion.status === "not_required" ? "status-badge--pending" : "status-badge--alert";
+    return `<span class="status-badge ${modifier}" title="${escapeHtml(completion.remarks || "")}">${escapeHtml(getNonCompletionLabel(completion.status))}</span>`;
   }
   return `<span class="status-badge">Completed</span>`;
 }
@@ -3864,6 +3867,7 @@ function createTaskStatusSelect(task, availability) {
       <option value="" selected disabled hidden>Update status</option>
       <option value="completed">Task completed</option>
       <option value="not_completed">Not completed</option>
+      <option value="not_required">Not required</option>
     </select>
   `;
 }

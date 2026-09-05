@@ -1003,28 +1003,75 @@ function getChecklistTemplate(task) {
 }
 
 
-function buildDefaultChecklistTemplate(task) {
-  const question = buildQuestionFromTaskTitle(task.title);
+// Serving water and tea/coffee happens for every walk-in, several times a day
+// per salesman. A photo of each glass proves nothing anyone reviews, so these
+// two courtesies are confirmed by their answer alone, with no upload field.
+const COURTESY_TASK_PATTERNS = [/\bserve\s+water\b/i, /\bserve\s+tea\b/i];
+const BEVERAGE_TASK_PATTERN = /\bserve\s+tea\b/i;
+
+
+function isCourtesyServiceTask(task) {
+  const title = normalizeTaskTitle(task?.title);
+  return COURTESY_TASK_PATTERNS.some((pattern) => pattern.test(title));
+}
+
+
+function isBeverageServiceTask(task) {
+  return BEVERAGE_TASK_PATTERN.test(normalizeTaskTitle(task?.title));
+}
+
+
+// "Did you serve something?" tells the showroom less than "what did you serve"
+// for the same single tap from the salesman. The leading blank keeps the
+// field's `required` honest — without it the first real option would sit
+// preselected and submit unread.
+function buildBeverageChecklistTemplate() {
   return {
     title: "TASK CHECKLIST",
     questions: [
       {
-        id: "completion_notes",
-        label: question.label,
-        labelHindi: question.labelHindi,
-        type: "checkbox",
-      },
-      {
-        id: "supporting_files",
-        label: "Upload supporting files if needed.",
-        labelHindi: "यदि आवश्यक हो तो सहायक फ़ाइलें अपलोड करें।",
-        type: "file",
-        hint: "Upload up to 10 supported files. Max 3 MB per file — photos are compressed automatically.",
-        // Uploading proof already implies "yes, done" — ticking Yes by hand
-        // too would be a redundant extra step for the same signal.
-        autoConfirmQuestionId: "completion_notes",
+        id: "beverage_served",
+        label: "What did you serve the customer?",
+        labelHindi: "आपने ग्राहक को क्या परोसा?",
+        type: "select",
+        options: ["", "Tea", "Coffee", "Water"],
       },
     ],
+  };
+}
+
+
+function buildDefaultChecklistTemplate(task) {
+  if (isBeverageServiceTask(task)) {
+    return buildBeverageChecklistTemplate();
+  }
+
+  const question = buildQuestionFromTaskTitle(task.title);
+  const questions = [
+    {
+      id: "completion_notes",
+      label: question.label,
+      labelHindi: question.labelHindi,
+      type: "checkbox",
+    },
+  ];
+
+  if (!isCourtesyServiceTask(task)) {
+    questions.push({
+      id: "supporting_files",
+      label: "Upload supporting files if needed.",
+      labelHindi: "यदि आवश्यक हो तो सहायक फ़ाइलें अपलोड करें।",
+      type: "file",
+      hint: "Upload up to 10 supported files. Max 3 MB per file — photos are compressed automatically.",
+      // Uploading proof already implies "yes, done" — ticking Yes by hand
+      // too would be a redundant extra step for the same signal.
+      autoConfirmQuestionId: "completion_notes",
+    });
+  }
+
+  return {
+    title: "TASK CHECKLIST",
+    questions,
   };
 }
 

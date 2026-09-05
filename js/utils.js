@@ -156,8 +156,6 @@ function getNextTuesdayValue() {
   date.setDate(date.getDate() + daysUntilTuesday);
   return dateToLocalValue(date);
 }
-
-
 function applyTaskScheduleOverrides(task) {
   if (!task) {
     return task;
@@ -828,4 +826,17 @@ async function compressImageFile(file, options = {}) {
     type: "image/jpeg",
     lastModified: Date.now(),
   });
+}
+
+
+// A task can be closed out without being done in two ways: the employee
+// couldn't do it ("not completed"), or it simply didn't apply on the day
+// ("not required"). Both carry a remark and both keep the occurrence out of
+// the "done" buckets, so they're checked together nearly everywhere.
+function isNonCompletionStatus(status) {
+  return status === "not_completed" || status === "not_required";
+}
+
+function getNonCompletionLabel(status) {
+  return status === "not_required" ? "Not required" : "Not completed";
 }
