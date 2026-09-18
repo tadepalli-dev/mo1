@@ -239,6 +239,13 @@
                       <input type="date" id="dashboardDateInput" />
                     </label>
 
+                    <label class="toolbar-field">
+                      <span>PC follow-up</span>
+                      <select id="adminPcFilter">
+                        <option value="">All PCs</option>
+                      </select>
+                    </label>
+
                     <button
                       type="button"
                       id="openAssignTaskButton"
@@ -260,6 +267,46 @@
 
                 <div id="adminTaskBoard" class="task-board"></div>
                 <div id="adminBoardPagination" class="pagination"></div>
+              </div>
+
+              <div id="pcAssignmentsSection" class="pantry-alerts-section hidden">
+                <button
+                  type="button"
+                  id="pcAssignmentsToggle"
+                  class="board-heading board-heading--toggle"
+                  aria-expanded="false"
+                  aria-controls="pcAssignmentsBoard"
+                >
+                  <div>
+                    <p class="section-label">PC Assignments</p>
+                    <h3>Who each PC follows up</h3>
+                  </div>
+                  <div class="board-heading__toggle-meta">
+                    <p id="pcAssignmentsMeta" class="board-meta"></p>
+                    <span class="board-heading__chevron" aria-hidden="true">▾</span>
+                  </div>
+                </button>
+
+                <div id="pcAssignmentsBoard" class="pc-assignments hidden">
+                  <p id="pcAssignmentsSummary" class="board-meta"></p>
+                  <label class="toolbar-field toolbar-field--search">
+                    <span>Search employee</span>
+                    <input
+                      type="search"
+                      id="pcAssignmentsSearch"
+                      placeholder="Search by name, email or designation"
+                    />
+                  </label>
+                  <div class="table-shell pc-assignments__list">
+                    <table class="user-table">
+                      <thead>
+                        <tr><th>Employee</th><th>Designation</th><th>Followed up by</th></tr>
+                      </thead>
+                      <tbody id="pcAssignmentsTableBody"></tbody>
+                    </table>
+                  </div>
+                  <div id="pcAssignmentsEmpty" class="empty-state hidden"></div>
+                </div>
               </div>
             </section>
 
@@ -660,6 +707,15 @@
                       <option value="all">All days</option>
                     </select>
                   </label>
+
+                  <label class="toolbar-field">
+                    <span>Status</span>
+                    <select id="userStatusFilter">
+                      <option value="active">Active only</option>
+                      <option value="inactive">Inactive only</option>
+                      <option value="all">All accounts</option>
+                    </select>
+                  </label>
                 </div>
               </div>
 
@@ -673,6 +729,7 @@
                       <th>Designation</th>
                       <th>Salesman Code</th>
                       <th>Day Off</th>
+                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody id="userTableBody"></tbody>

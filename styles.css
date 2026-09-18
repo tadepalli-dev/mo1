@@ -1442,6 +1442,62 @@ textarea {
   font-weight: 700;
 }
 
+/* A walk-in card can now carry a second badge when it is held over from an
+   earlier day, so the badges get their own wrapping row. */
+.pc-assignments {
+  display: grid;
+  gap: 0.9rem;
+  padding: 0 1.15rem 1.15rem;
+}
+
+/* 113 employees in one list, so it scrolls inside the panel rather than
+   pushing the task board off the screen. */
+.pc-assignments__list {
+  max-height: 26rem;
+  overflow: auto;
+}
+
+/* The tile holds a control rather than a static value, so it needs the room
+   the <strong> line used to take. */
+.user-status-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.task-kpi--control {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.pc-assignment-select {
+  width: 100%;
+  min-width: 11rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  color: var(--text);
+  font: inherit;
+}
+
+.task-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.task-badge--carried-over {
+  background: var(--accent-soft);
+  color: #a3552a;
+}
+
+.task-card--carried-over {
+  border-color: rgba(209, 124, 65, 0.36);
+}
+
 .toolbar-field span {
   font-size: 0.84rem;
   font-weight: 700;

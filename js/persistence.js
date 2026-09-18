@@ -696,6 +696,8 @@ async function bootstrapState() {
     server?.vehicleAllocations && typeof server.vehicleAllocations === "object" ? server.vehicleAllocations : {};
   state.checklistFollowUps =
     server?.checklistFollowUps && typeof server.checklistFollowUps === "object" ? server.checklistFollowUps : {};
+  state.pcAssignments =
+    server?.pcAssignments && typeof server.pcAssignments === "object" ? server.pcAssignments : {};
 }
 
 
@@ -787,6 +789,9 @@ async function refreshStateFromServer() {
   }
   if (server.checklistFollowUps && typeof server.checklistFollowUps === "object") {
     state.checklistFollowUps = server.checklistFollowUps;
+  }
+  if (server.pcAssignments && typeof server.pcAssignments === "object") {
+    state.pcAssignments = server.pcAssignments;
   }
 }
 

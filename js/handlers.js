@@ -522,6 +522,73 @@ function handlePantryAlertsToggle() {
 }
 
 
+function handlePcAssignmentsToggle() {
+  state.pcAssignmentsExpanded = !state.pcAssignmentsExpanded;
+  renderPcAssignmentsPanel();
+}
+
+
+function handlePcAssignmentsSearch(event) {
+  state.pcAssignmentsSearch = event.target.value;
+  renderPcAssignmentsPanel();
+}
+
+
+// Storing the PC against the employee is what keeps one employee on exactly
+// one board, so re-assigning is a straight overwrite with nothing to clean up.
+async function handlePcAssignmentChange(event) {
+  const select = event.target.closest("[data-pc-assignment]");
+  if (!select) {
+    return;
+  }
+
+  const employeeKey = select.getAttribute("data-employee-key");
+  if (!employeeKey) {
+    return;
+  }
+
+  const store = { ...getPcAssignmentStore() };
+  if (select.value) {
+    store[employeeKey] = select.value;
+  } else {
+    delete store[employeeKey];
+  }
+
+  const previous = state.pcAssignments;
+  state.pcAssignments = store;
+  select.disabled = true;
+
+  try {
+    await persistCollection("pcAssignments", store);
+  } catch (error) {
+    // Put the board back rather than showing an assignment that never saved.
+    state.pcAssignments = previous;
+    select.disabled = false;
+    renderPcAssignmentsPanel();
+    window.alert("Could not save the assignment. Check the connection and try again.");
+    return;
+  }
+
+  select.disabled = false;
+  renderPcAssignmentsPanel();
+  // The select already shows its own new value, so rebuild the board only when
+  // the change can alter which cards belong on it — a needless rebuild would
+  // collapse every card Asha had opened.
+  if (state.adminPcFilter) {
+    renderAdminTaskBoard();
+  }
+}
+
+
+// The dropdown sits inside the card's <summary>, where a click would otherwise
+// open and close the card underneath it while she is choosing.
+function handlePcAssignmentSelectClick(event) {
+  if (event.target.closest("[data-pc-assignment]")) {
+    event.stopPropagation();
+  }
+}
+
+
 function handleToggleAddUserForm() {
   const isHidden = elements.addUserForm.classList.toggle("hidden");
   elements.toggleAddUserForm.textContent = isHidden ? "+ Add user" : "✕ Close";
@@ -678,6 +745,19 @@ async function handleChecklistSubmit(event) {
   const submittedAt = new Date().toISOString();
   const fuelRoute = getFuelApprovalRoute(state.activeChecklistTask, responses);
 
+  // The record is replaced wholesale below, so a cashier's fuel-request
+  // sign-off has to be carried across by hand or filling in the checklist
+  // would quietly erase the very approval that unlocked it.
+  const previousCompletion = state.completions[completionKey];
+  const fuelRequestCarryOver = previousCompletion?.fuelRequestApprovalStatus
+    ? {
+        fuelRequestApprovalStatus: previousCompletion.fuelRequestApprovalStatus,
+        fuelRequestApprovedByName: previousCompletion.fuelRequestApprovedByName,
+        fuelRequestApprovedAt: previousCompletion.fuelRequestApprovedAt,
+        fuelChecklistSubmittedAt: submittedAt,
+      }
+    : {};
+
   state.completions[completionKey] = {
     taskId: state.activeChecklistTask.taskId || state.activeChecklistTask.id,
     occurrenceDate: state.activeChecklistTask.occurrenceDate,
@@ -691,6 +771,7 @@ async function handleChecklistSubmit(event) {
     ...(fuelRoute ? { fuelMileage: fuelRoute.mileage, fuelMileageThreshold: fuelRoute.threshold } : {}),
     ...(fuelRoute?.route === "cashier" ? { cashierApprovalStatus: "pending" } : {}),
     ...(fuelRoute?.route === "hr" ? { hrApprovalStatus: "pending" } : {}),
+    ...fuelRequestCarryOver,
   };
 
   saveCompletions();
@@ -1565,6 +1646,46 @@ function handleDayOffFilterChange(event) {
 }
 
 
+function handleUserStatusFilterChange(event) {
+  state.userStatus = event.target.value;
+  state.userTablePage = 1;
+  renderUserDirectory();
+}
+
+
+// Deactivating takes the person off every board at once — Asha's, both PCs'
+// and the assignment list — without touching their account or their history,
+// so switching them back on restores exactly what was there.
+function handleToggleUserActive(event) {
+  const trigger = event.target.closest("[data-toggle-user-active]");
+  if (!trigger) {
+    return;
+  }
+
+  if (!canManageUsers(state.activeUser)) {
+    window.alert("Only admin users can activate or deactivate an account.");
+    return;
+  }
+
+  const identifier = String(trigger.getAttribute("data-toggle-user-active") || "").toLowerCase();
+  const userRecord = state.users.find(
+    (user) => String(user.email || user.name || "").toLowerCase() === identifier
+  );
+  if (!userRecord) {
+    return;
+  }
+
+  const deactivating = isActiveUser(userRecord);
+  if (deactivating && !window.confirm(`Hide ${userRecord.name} from every task board? Their account and history stay untouched.`)) {
+    return;
+  }
+
+  userRecord.active = !deactivating;
+  saveUsers();
+  renderDashboard();
+}
+
+
 function handleEmployeeTaskFilterChange() {
   state.employeeTaskPage = 1;
   renderEmployeeTaskBoard();
@@ -1832,6 +1953,13 @@ function handleAdminDateChange(event) {
 }
 
 
+function handleAdminPcFilterChange(event) {
+  state.adminPcFilter = event.target.value;
+  state.adminBoardPage = 1;
+  renderAdminTaskBoard();
+}
+
+
 function handleAssignModalBackdropClick(event) {
   if (event.target === elements.assignTaskModal) {
     closeAssignTaskModal();
@@ -1915,7 +2043,10 @@ function handleEmployeeTaskAction(event) {
     return;
   }
 
-  openChecklistModal(task);
+  // An approved fuel request opens as the fuel checklist, so the template, the
+  // km gate and the mileage routing all resolve off that title. The task id and
+  // occurrence date are untouched, so it writes back to the same row.
+  openChecklistModal(isFuelChecklistStageDue(task) ? toFuelChecklistStageTask(task) : task);
 }
 
 // No modal, no data entry — requesting fuel is itself the whole submission.
@@ -2271,10 +2402,22 @@ async function uploadChecklistAttachment(file) {
   // outside the checklist form.
   let payload = file;
   if (payload.size > maxBytes && isCompressibleImage(payload)) {
-    try {
-      payload = await compressImageFile(payload);
-    } catch (error) {
-      payload = file;
+    // Two attempts: the usual target first, then a harder downscale, so a very
+    // large photo still lands under the cap instead of failing the whole
+    // submission on its last step with nothing the employee can do about it.
+    for (const options of [{}, { targetBytes: Math.round(maxBytes / 2), maxDimension: 1280 }]) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const attempt = await compressImageFile(file, options);
+        if (attempt.size < payload.size) {
+          payload = attempt;
+        }
+      } catch (error) {
+        // Keep the smallest we have; the size check below reports the failure.
+      }
+      if (payload.size <= maxBytes) {
+        break;
+      }
     }
   }
 

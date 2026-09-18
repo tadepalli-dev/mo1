@@ -135,7 +135,7 @@ function getBearerToken(request) {
   return match ? match[1].trim() : null;
 }
 
-const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests", "vehicleChangeRequests", "vehicleAllocations", "checklistFollowUps"];
+const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests", "vehicleChangeRequests", "vehicleAllocations", "checklistFollowUps", "pcAssignments"];
 const STORE_DEFAULTS = {
   users: [],
   tasks: [],
@@ -148,6 +148,7 @@ const STORE_DEFAULTS = {
   vehicleChangeRequests: [],
   vehicleAllocations: {},
   checklistFollowUps: {},
+  pcAssignments: {},
 };
 const CASHIER_EMAIL = "dilip.gupta@curtainsandcarpets.com";
 const LEGACY_HRULLEKHA_EMAIL = "hrullekha@modesigns.in";

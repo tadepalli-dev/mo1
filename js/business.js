@@ -295,6 +295,52 @@ function isFuelRequestApprover(email) {
   return FUEL_REQUEST_APPROVER_EMAILS.includes(String(email || "").toLowerCase());
 }
 
+// Approval is not the end of the errand — it is permission to go and refuel,
+// after which the driver still owes the odometer, litres, cost and slip. The
+// same row carries that second stage, presented under the shared fuel
+// checklist title so the template lookup, the km gate and the mileage routing
+// below all resolve off it unchanged instead of being duplicated here.
+const FUEL_CHECKLIST_STAGE_TITLE = "Fuel checklist.";
+
+function isFuelRequestApproved(completion) {
+  return completion?.fuelRequestApprovalStatus === "approved";
+}
+
+// Allowed by the cashier, but the readings are not in yet.
+function isFuelChecklistStageDue(task, completion = getCompletionRecord(task)) {
+  return (
+    isFuelRequestTask(task)
+    && isFuelRequestApproved(completion)
+    && !completion?.fuelChecklistSubmittedAt
+  );
+}
+
+function toFuelChecklistStageTask(task) {
+  return { ...task, title: FUEL_CHECKLIST_STAGE_TITLE };
+}
+
+// Tapping "Request" writes a completion straight away, with no status on it,
+// so every board that reads "a completion exists" as "the job is done" counted
+// the errand finished before the cashier had even looked at it. The request is
+// only the ask — the work is still owed until the checklist behind it is
+// filed, which is what keeps it on the PC's chase list.
+function isFuelRequestAwaitingChecklist(task, completion) {
+  return isFuelRequestTask(task) && Boolean(completion) && !completion.fuelChecklistSubmittedAt;
+}
+
+// The driver's row renames itself once the cashier allows the request, so the
+// monitoring boards call it the same thing his own board does.
+function getMonitorTaskDisplayTitle(task, completion) {
+  return isFuelRequestTask(task) && isFuelRequestApproved(completion)
+    ? "Fuel checklist"
+    : getTaskDisplayTitle(task);
+}
+
+// What the PC is actually waiting on, so "pending" says who to chase.
+function getFuelRequestPendingLabel(completion) {
+  return isFuelRequestApproved(completion) ? "Fuel checklist pending" : "Awaiting fuel approval";
+}
+
 function getPendingFuelRequestApprovalEntries() {
   return Object.entries(state.completions)
     .filter(([, completion]) => completion.fuelRequestApprovalStatus === "pending")
@@ -340,6 +386,57 @@ function getFuelApprovalRoute(task, responses) {
   // is unusual enough to flag for HR.
   const threshold = getFuelGateProfileForUser(user, vehicleType).mileageKmPerLiter;
   return { mileage, threshold, route: mileage > threshold ? "cashier" : "hr" };
+}
+
+// Four people hold the PC role — Nikita, Aanchal, Pooja and Heena — and the
+// monitoring board showed all 113 employees to every one of them, so the same
+// person got chased four times over and nobody owned the follow-up. Asha hands
+// each employee to one PC, and that PC's board then covers exactly her list.
+//
+// The assignment is stored against the EMPLOYEE, not the PC, which is what
+// makes "one PC per employee" true by construction rather than by upkeep.
+function getEmployeeAssignmentKey(person) {
+  const email = String(person?.email || person?.assigneeEmail || "").trim().toLowerCase();
+  return email || normalizePersonName(person?.name || person?.assigneeName || "");
+}
+
+function getPcAssignmentStore() {
+  return state.pcAssignments && typeof state.pcAssignments === "object" ? state.pcAssignments : {};
+}
+
+function getAssignedPcKeyForEmployee(employeeKey) {
+  return String(getPcAssignmentStore()[employeeKey] || "");
+}
+
+// Unassigned means unmonitored, by Asha's instruction: an employee she has not
+// handed to anyone belongs to no PC board rather than to all of them, so the
+// boards stay clean while she works down the list.
+function isEmployeeAssignedToPc(employeeKey, pcUser) {
+  return Boolean(employeeKey) && getAssignedPcKeyForEmployee(employeeKey) === getEmployeeAssignmentKey(pcUser);
+}
+
+function getUserByAssignmentKey(employeeKey) {
+  return state.users.find((user) => getEmployeeAssignmentKey(user) === employeeKey) || null;
+}
+
+// A task whose assignee has no account at all stays visible: hiding it would
+// silently drop work that nobody could then find again.
+function isAssignmentKeyActive(employeeKey) {
+  const user = getUserByAssignmentKey(employeeKey);
+  return !user || isActiveUser(user);
+}
+
+
+// Only PCs who are still here can be handed new people.
+function getPcMonitorUsers() {
+  return state.users
+    .filter((user) => isPcMonitorUser(user) && isActiveUser(user))
+    .sort((left, right) => String(left.name || "").localeCompare(String(right.name || "")));
+}
+
+function getAssignedEmployeeCountForPc(pcUser) {
+  const pcKey = getEmployeeAssignmentKey(pcUser);
+  return Object.values(getPcAssignmentStore()).filter((value) => String(value) === pcKey).length;
 }
 
 function getPendingCashierApprovalEntries() {
@@ -428,6 +525,14 @@ function validateFuelChecklistSubmission(task, responses) {
     return { ok: true };
   }
 
+  // The gate stops a driver refuelling every couple of days on his own say-so.
+  // A request the cashier has already signed off has had that judgement made
+  // by hand, so re-blocking it here would strand him holding an approval he
+  // cannot act on — which is the dead end this whole stage exists to remove.
+  if (isFuelRequestApproved(getCompletionRecord(task))) {
+    return { ok: true };
+  }
+
   const user = { email: task?.assigneeEmail, name: task?.assigneeName };
   const history = getFuelChecklistHistoryForUser(user);
   if (history.length < FUEL_CHECKLIST_GRACE_SUBMISSIONS) {
@@ -462,7 +567,12 @@ function getFilteredUsers() {
     const matchesQuery = !state.query || searchable.includes(state.query);
     const matchesRole = state.role === "all" || normalizeValue(user.role) === state.role;
     const matchesDayOff = state.dayOff === "all" || normalizeValue(user.dayOff) === state.dayOff;
-    return matchesQuery && matchesRole && matchesDayOff;
+    // Inactive accounts are hidden by default rather than removed — Asha still
+    // needs to find one to switch it back on.
+    const matchesStatus =
+      state.userStatus === "all"
+      || (state.userStatus === "inactive" ? !isActiveUser(user) : isActiveUser(user));
+    return matchesQuery && matchesRole && matchesDayOff && matchesStatus;
   });
 }
 
@@ -475,6 +585,10 @@ function groupAdminTasksByAssignee(tasks) {
     if (!groups.has(key)) {
       groups.set(key, {
         assigneeName: task.assigneeName,
+        assigneeEmail: task.assigneeEmail || "",
+        // Keyed the same way the PC assignment store is, so the card can say
+        // who follows this employee up without re-deriving it per render.
+        employeeKey: getEmployeeAssignmentKey(task),
         department: task.department,
         starts: task.plannedDate,
         activeUntil: task.validUntil,
@@ -1034,7 +1148,7 @@ function buildBeverageChecklistTemplate() {
         label: "What did you serve the customer?",
         labelHindi: "आपने ग्राहक को क्या परोसा?",
         type: "select",
-        options: ["", "Tea", "Coffee", "Water"],
+        options: ["", "Tea", "Coffee", "Water", "Soft drink", "Snacks"],
       },
     ],
   };

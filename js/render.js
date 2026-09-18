@@ -14,6 +14,7 @@ function renderDashboard() {
   renderStats();
   renderUserDirectory();
   renderPasswordResetRequestsPanel();
+  renderPcAssignmentsPanel();
   renderApprovalsPage();
   renderCompliancePage();
   renderBuddyPage();
@@ -368,6 +369,15 @@ function buildPcEmployeeBuckets(selectedDate) {
       if (!groupKey) {
         return;
       }
+      // Someone who has left should stop appearing on anyone's chase list.
+      if (!isAssignmentKeyActive(groupKey)) {
+        return;
+      }
+      // A PC sees only the employees Asha handed to her. An admin opening this
+      // board is not a PC monitor and still sees the whole floor.
+      if (isPcMonitorUser(state.activeUser) && !isEmployeeAssignedToPc(groupKey, state.activeUser)) {
+        return;
+      }
       if (!byEmployee.has(groupKey)) {
         byEmployee.set(groupKey, {
           key: groupKey,
@@ -380,7 +390,11 @@ function buildPcEmployeeBuckets(selectedDate) {
       }
       const group = byEmployee.get(groupKey);
       const completion = completionsByKey.get(getCompletionKey(task)) || null;
-      if (completion && !isNonCompletionStatus(completion.status)) {
+      if (
+        completion
+        && !isNonCompletionStatus(completion.status)
+        && !isFuelRequestAwaitingChecklist(task, completion)
+      ) {
         group.done.push({ task, completion });
       } else {
         group.outstanding.push({ task, completion });
@@ -440,7 +454,11 @@ function createPcEmployeeCard(group, selectedDate, showFollowUp, view) {
   // 176 outstanding occurrences drawn from eight distinct jobs. Listing them
   // raw filled the screen with duplicates, so show the distinct job names and
   // count the rest.
-  const distinctJobs = [...new Set(shownEntries.map((entry) => entry.task.title).filter(Boolean))];
+  const distinctJobs = [
+    ...new Set(
+      shownEntries.map((entry) => getMonitorTaskDisplayTitle(entry.task, entry.completion)).filter(Boolean)
+    ),
+  ];
   const shownJobs = distinctJobs.slice(0, 3);
   const hiddenJobCount = distinctJobs.length - shownJobs.length;
 
@@ -475,14 +493,16 @@ function createPcEmployeeCard(group, selectedDate, showFollowUp, view) {
           <tbody>
             ${rows.map(({ entry, done }) => `
               <tr>
-                <td>${escapeHtml(getTaskDisplayTitle(entry.task))}</td>
+                <td>${escapeHtml(getMonitorTaskDisplayTitle(entry.task, entry.completion))}</td>
                 <td>${escapeHtml(getTaskCustomerLabel(entry.task))}</td>
                 <td>${escapeHtml(getTaskCustomerKey(entry.task) || "-")}</td>
                 <td>${done
                   ? '<span class="task-badge">Submitted</span>'
-                  : entry.completion
-                    ? '<span class="task-badge task-badge--alert">Marked not completed</span>'
-                    : '<span class="task-badge task-badge--alert">Not submitted</span>'}</td>
+                  : isFuelRequestAwaitingChecklist(entry.task, entry.completion)
+                    ? `<span class="task-badge task-badge--alert">${escapeHtml(getFuelRequestPendingLabel(entry.completion))}</span>`
+                    : entry.completion
+                      ? '<span class="task-badge task-badge--alert">Marked not completed</span>'
+                      : '<span class="task-badge task-badge--alert">Not submitted</span>'}</td>
               </tr>`).join("")}
           </tbody>
         </table>
@@ -560,9 +580,20 @@ function renderPcDashboardPanel() {
   elements.pcPendingMeta.textContent = `${buckets.pending.length} employee${buckets.pending.length === 1 ? "" : "s"} have submitted nothing on ${formattedDate}`;
   elements.pcNotCompletedMeta.textContent = `${buckets.notCompleted.length} employee${buckets.notCompleted.length === 1 ? "" : "s"} still have tasks left on ${formattedDate}`;
   elements.pcCompletedMeta.textContent = `${buckets.completed.length} employee${buckets.completed.length === 1 ? "" : "s"} finished at least one task on ${formattedDate}`;
-  elements.pcPendingEmpty.textContent = `Nobody is outstanding on ${formattedDate}.`;
-  elements.pcNotCompletedEmpty.textContent = `No part-finished employees on ${formattedDate}.`;
-  elements.pcCompletedEmpty.textContent = `Nobody has finished a task on ${formattedDate}.`;
+  // With nobody assigned yet an empty board looks broken rather than unstaffed,
+  // so say which it is.
+  const awaitingAssignment =
+    isPcMonitorUser(state.activeUser) && getAssignedEmployeeCountForPc(state.activeUser) === 0;
+  const noAssignmentsNotice = "No employees are assigned to you yet \u2014 Asha sets this from her dashboard.";
+  elements.pcPendingEmpty.textContent = awaitingAssignment
+    ? noAssignmentsNotice
+    : `Nobody is outstanding on ${formattedDate}.`;
+  elements.pcNotCompletedEmpty.textContent = awaitingAssignment
+    ? noAssignmentsNotice
+    : `No part-finished employees on ${formattedDate}.`;
+  elements.pcCompletedEmpty.textContent = awaitingAssignment
+    ? noAssignmentsNotice
+    : `Nobody has finished a task on ${formattedDate}.`;
 
   const activeTab = ["pending", "notcompleted", "completed"].includes(state.pcMonitorTab)
     ? state.pcMonitorTab
@@ -627,6 +658,8 @@ function renderAdminTaskBoard() {
   const selectedDate = elements.dashboardDateInput.value;
   const searchQuery = state.homeSearch;
 
+  const pcFilter = String(state.adminPcFilter || "");
+
   const visibleTasks = state.tasks.filter((task) => {
     const createdByUser = task.assignedByEmail.toLowerCase() === state.activeUser.email.toLowerCase();
     const matchesDate = !selectedDate || taskOccursOnDate(task, selectedDate);
@@ -634,17 +667,45 @@ function renderAdminTaskBoard() {
       .join(" ")
       .toLowerCase();
     const matchesSearch = !searchQuery || searchableText.includes(searchQuery);
-    return createdByUser && matchesDate && matchesSearch && task.active !== false;
+    // Narrowing to one PC answers "what has Nikita actually been given?", and
+    // "unassigned" answers the more useful question of who nobody is chasing.
+    const employeeKey = getEmployeeAssignmentKey(task);
+    const assignedPcKey = getAssignedPcKeyForEmployee(employeeKey);
+    const matchesPc =
+      !pcFilter
+      || (pcFilter === "unassigned" ? !assignedPcKey : assignedPcKey === pcFilter);
+    return (
+      createdByUser
+      && matchesDate
+      && matchesSearch
+      && matchesPc
+      && isAssignmentKeyActive(employeeKey)
+      && task.active !== false
+    );
   });
 
+  renderAdminPcFilterOptions();
+
   const groupedTasks = groupAdminTasksByAssignee(visibleTasks);
-  elements.adminBoardMeta.textContent = `${visibleTasks.length} active task${visibleTasks.length === 1 ? "" : "s"} across ${groupedTasks.length} employee${groupedTasks.length === 1 ? "" : "s"}`;
+  const filteredPcName = getPcMonitorUsers().find(
+    (pc) => getEmployeeAssignmentKey(pc) === pcFilter
+  )?.name;
+  const pcScope = !pcFilter
+    ? ""
+    : pcFilter === "unassigned"
+      ? " · not assigned to any PC"
+      : ` · followed up by ${filteredPcName || pcFilter}`;
+  elements.adminBoardMeta.textContent = `${visibleTasks.length} active task${visibleTasks.length === 1 ? "" : "s"} across ${groupedTasks.length} employee${groupedTasks.length === 1 ? "" : "s"}${pcScope}`;
   elements.adminTaskBoard.innerHTML = "";
   elements.adminBoardPagination.innerHTML = "";
 
   if (!visibleTasks.length) {
     elements.adminTaskBoard.append(
-      createEmptyState("No tasks match the current search or date. Assign a task to start the admin board.")
+      createEmptyState(
+        pcFilter
+          ? "No tasks match this PC for the current search or date. Assign employees to a PC below the board."
+          : "No tasks match the current search or date. Assign a task to start the admin board."
+      )
     );
     return;
   }
@@ -667,6 +728,34 @@ function renderAdminTaskBoard() {
 
   renderAdminBoardPagination(totalPages);
 }
+
+// Rebuilt on every board render so a PC added (or renamed) in user management
+// shows up here without a reload; the current choice is preserved unless the
+// PC it pointed at is gone.
+function renderAdminPcFilterOptions() {
+  if (!elements.adminPcFilter) {
+    return;
+  }
+
+  const pcUsers = getPcMonitorUsers();
+  const current = String(state.adminPcFilter || "");
+  const options = [`<option value="">All PCs</option>`]
+    .concat(
+      pcUsers.map((pc) => {
+        const pcKey = getEmployeeAssignmentKey(pc);
+        return `<option value="${escapeHtml(pcKey)}">${escapeHtml(pc.name)}</option>`;
+      })
+    )
+    .concat([`<option value="unassigned">Not assigned to a PC</option>`])
+    .join("");
+
+  elements.adminPcFilter.innerHTML = options;
+  const stillExists =
+    !current || current === "unassigned" || pcUsers.some((pc) => getEmployeeAssignmentKey(pc) === current);
+  state.adminPcFilter = stillExists ? current : "";
+  elements.adminPcFilter.value = state.adminPcFilter;
+}
+
 
 const ADMIN_BOARD_PAGE_SIZE = 4;
 
@@ -1990,20 +2079,44 @@ function getAssignedWalkinGroupsByDate(user) {
 
 function renderWalkinCustomerBoard(walkinGroupsByDate = getAssignedWalkinGroupsByDate(state.activeUser)) {
   const today = todayValue();
-  // Strictly today's handovers only — a customer disappears at midnight
-  // regardless of whether their checklist was finished, and tomorrow's
-  // handovers replace them.
-  const groups = walkinGroupsByDate.get(today) || [];
+  const todaysGroups = walkinGroupsByDate.get(today) || [];
 
+  // A customer used to drop off this board at midnight whether or not their
+  // checklist was finished, which both hid the name from the salesman and
+  // quietly wrote off the work still owed. An earlier handover now stays put
+  // for as long as it has an unfinished task; once every task is done it
+  // disappears at midnight exactly as it did before. Future-dated handovers
+  // stay hidden until their day arrives.
+  const carriedOver = [...walkinGroupsByDate.entries()]
+    .filter(([walkinDate]) => walkinDate && walkinDate < today)
+    .sort(([left], [right]) => right.localeCompare(left))
+    .flatMap(([, dateGroups]) => dateGroups.filter((group) => group.completedCount < group.total));
+
+  const groups = [...todaysGroups, ...carriedOver];
+
+  // The status dropdown looks walk-in tasks up in here by occurrence identity,
+  // so the carried-over rows have to be present too or picking a status on one
+  // would silently do nothing.
   state.visibleWalkinTasks = groups.flatMap((group) => group.tasks);
-  state.todayWalkinCustomers = groups.map((group) => ({
+  state.todayWalkinCustomers = todaysGroups.map((group) => ({
     walkinId: group.walkinId,
     customerName: group.customerName,
   }));
 
-  elements.walkinCustomerMeta.textContent = groups.length
-    ? `${groups.length} customer${groups.length === 1 ? "" : "s"} handed over to you today`
-    : "";
+  const pendingTaskCount = carriedOver.reduce(
+    (total, group) => total + (group.total - group.completedCount),
+    0
+  );
+  elements.walkinCustomerMeta.textContent = [
+    todaysGroups.length
+      ? `${todaysGroups.length} customer${todaysGroups.length === 1 ? "" : "s"} handed over to you today`
+      : "",
+    pendingTaskCount
+      ? `${pendingTaskCount} task${pendingTaskCount === 1 ? "" : "s"} still pending from earlier days`
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   elements.walkinCustomerBoard.innerHTML = "";
   if (!groups.length) {
@@ -2023,6 +2136,15 @@ function renderWalkinCustomerBoard(walkinGroupsByDate = getAssignedWalkinGroupsB
 function createWalkinCustomerCard(group) {
   const card = document.createElement("details");
   card.className = "task-card task-card--group";
+
+  // A customer held over from an earlier day is labelled and opened up front,
+  // so the salesman sees what is still owed instead of having to expand each
+  // card to find out.
+  const isCarriedOver = Boolean(group.walkinDate) && group.walkinDate < todayValue();
+  if (isCarriedOver) {
+    card.classList.add("task-card--carried-over");
+    card.open = true;
+  }
 
   const tasksMarkup = group.tasks
     .map((task) => {
@@ -2054,7 +2176,12 @@ function createWalkinCustomerCard(group) {
             ${group.details ? `<span>${escapeHtml(group.details)}</span>` : ""}
           </div>
         </div>
-        <span class="task-badge">${escapeHtml(`${group.completedCount}/${group.total} tasks done`)}</span>
+        <div class="task-card__badges">
+          ${isCarriedOver
+            ? `<span class="task-badge task-badge--carried-over">${escapeHtml(`Pending from ${formatDateValue(group.walkinDate)}`)}</span>`
+            : ""}
+          <span class="task-badge">${escapeHtml(`${group.completedCount}/${group.total} tasks done`)}</span>
+        </div>
       </div>
     </summary>
     <div class="admin-task-list">
@@ -2243,6 +2370,121 @@ function renderPasswordResetRequestsPanel() {
   pendingRequests.forEach((request, index) => {
     elements.passwordResetRequestsBoard.append(createPasswordResetRequestCard(request, index));
   });
+}
+
+
+// Shared by the employee cards on Asha's task board and by the assignments
+// panel below it, so the two can never offer different choices or disagree
+// about who an employee currently belongs to.
+// Everyone who currently carries at least one live task, keyed the same way
+// the assignment store is.
+function getEmployeeKeysWithActiveTasks() {
+  const keys = new Set();
+  state.tasks.forEach((task) => {
+    if (task.active === false) {
+      return;
+    }
+    const key = getEmployeeAssignmentKey(task);
+    if (key) {
+      keys.add(key);
+    }
+  });
+  return keys;
+}
+
+
+function buildPcAssignmentOptions(employeeKey) {
+  const current = getAssignedPcKeyForEmployee(employeeKey);
+  const pcUsers = getPcMonitorUsers();
+  const options = [`<option value=""${current ? "" : " selected"}>Unassigned</option>`].concat(
+    pcUsers.map((pc) => {
+      const pcKey = getEmployeeAssignmentKey(pc);
+      return `<option value="${escapeHtml(pcKey)}"${pcKey === current ? " selected" : ""}>${escapeHtml(pc.name)}</option>`;
+    })
+  );
+
+  // The PC this employee was handed to has since been deactivated. Dropping
+  // the option would leave the control showing "Unassigned" while the store
+  // still said otherwise, so it stays listed and says what happened.
+  if (current && !pcUsers.some((pc) => getEmployeeAssignmentKey(pc) === current)) {
+    const formerPc = state.users.find((user) => getEmployeeAssignmentKey(user) === current);
+    options.push(
+      `<option value="${escapeHtml(current)}" selected>${escapeHtml(formerPc?.name || current)} (inactive)</option>`
+    );
+  }
+
+  return options.join("");
+}
+
+
+// Asha's control over which PC chases which employee. Only she can see it —
+// the same test that lets her assign tasks in the first place.
+function renderPcAssignmentsPanel() {
+  if (!elements.pcAssignmentsSection) {
+    return;
+  }
+
+  const canAssign = canAssignTasks(state.activeUser);
+  elements.pcAssignmentsSection.classList.toggle("hidden", !canAssign);
+  if (!canAssign) {
+    return;
+  }
+
+  const pcUsers = getPcMonitorUsers();
+  const store = getPcAssignmentStore();
+  const assignedCount = Object.values(store).filter(Boolean).length;
+
+  elements.pcAssignmentsMeta.textContent = `${pcUsers.length} PC${pcUsers.length === 1 ? "" : "s"} · ${assignedCount} employee${assignedCount === 1 ? "" : "s"} assigned`;
+  elements.pcAssignmentsSummary.textContent = pcUsers.length
+    ? pcUsers.map((pc) => `${pc.name}: ${getAssignedEmployeeCountForPc(pc)}`).join(" · ")
+    : "No PC users exist yet.";
+
+  elements.pcAssignmentsToggle.setAttribute("aria-expanded", String(state.pcAssignmentsExpanded));
+  elements.pcAssignmentsBoard.classList.toggle("hidden", !state.pcAssignmentsExpanded);
+  if (!state.pcAssignmentsExpanded) {
+    return;
+  }
+
+  const search = String(state.pcAssignmentsSearch || "").trim().toLowerCase();
+  const employeesWithTasks = getEmployeeKeysWithActiveTasks();
+  const rows = state.users
+    .filter((user) => !isAdmin(user))
+    .filter(isActiveUser)
+    // Handing a PC someone with no tasks achieves nothing — their board would
+    // just show the person empty — and it is what buried the real names under
+    // test accounts and "UNKNOWN - please update".
+    .filter((user) => employeesWithTasks.has(getEmployeeAssignmentKey(user)))
+    .filter((user) =>
+      !search
+      || [user.name, user.email, user.designation, user.department]
+        .some((value) => String(value || "").toLowerCase().includes(search))
+    )
+    .sort((left, right) => String(left.name || "").localeCompare(String(right.name || "")));
+
+  elements.pcAssignmentsEmpty.classList.toggle("hidden", rows.length > 0);
+  elements.pcAssignmentsEmpty.textContent = search
+    ? `No employee matches "${search}".`
+    : "No employees to assign.";
+
+  elements.pcAssignmentsTableBody.innerHTML = rows
+    .map((user) => {
+      const employeeKey = getEmployeeAssignmentKey(user);
+      const options = buildPcAssignmentOptions(employeeKey);
+      return `
+        <tr>
+          <td class="name-cell">
+            <strong>${escapeHtml(user.name)}</strong>
+            <span>${escapeHtml(user.email || "-")}</span>
+          </td>
+          <td>${escapeHtml(normalizeValue(user.designation))}</td>
+          <td>
+            <select class="pc-assignment-select" data-pc-assignment data-employee-key="${escapeHtml(employeeKey)}" aria-label="PC monitoring ${escapeHtml(user.name)}">
+              ${options}
+            </select>
+          </td>
+        </tr>`;
+    })
+    .join("");
 }
 
 
@@ -2890,11 +3132,45 @@ function readFileAsBase64(file) {
   });
 }
 
+// The hint on every upload field promises up to ten attachments, so the cap
+// belongs here and not only in the wording.
+const MAX_CHECKLIST_FILES = 10;
+
+// Rebuilding a FileList is only possible through DataTransfer. Where the
+// browser has no working one we must not intercept the picker at all —
+// swallowing the change event with no way to put the files back loses the
+// selection outright, which reads to the employee as "nothing happened".
+function canRebuildFileList() {
+  try {
+    return typeof DataTransfer === "function" && new DataTransfer().files instanceof FileList;
+  } catch (error) {
+    return false;
+  }
+}
+
+function fileIdentity(file) {
+  return `${file.name}|${file.size}|${file.lastModified}`;
+}
+
+// A native file input replaces its whole selection on every pick, and both the
+// compression pass and the removable file list rewrite field.files. The
+// accepted selection therefore lives on the field itself rather than inside
+// either closure, so a file dropped from the list cannot reappear when the
+// next photo is added.
+function getFieldSelection(field) {
+  return Array.isArray(field.checklistSelection) ? field.checklistSelection : [];
+}
+
+function setFieldSelection(field, files) {
+  field.checklistSelection = files;
+}
+
 // Employees photograph slips and meters on phones that produce 3-8 MB images,
 // well past the 3 MB attachment cap, and hit a validation error at submit time
 // with no way to shrink the photo themselves. This re-encodes oversized images
-// the moment they're picked, then re-fires "change" so the OCR, auto-confirm
-// and file-list handlers registered after it work off the compressed files.
+// the moment they're picked, merges them into the files already attached, then
+// re-fires "change" so the OCR, auto-confirm and file-list handlers registered
+// after it work off the compressed selection.
 function attachImageCompression(field, wrapper) {
   const status = document.createElement("p");
   status.className = "checklist-hint checklist-compress-status hidden";
@@ -2905,6 +3181,16 @@ function attachImageCompression(field, wrapper) {
   // drops out if a later pick has already superseded it.
   let latestSelection = 0;
 
+  // Puts an exact set of files back into the input. The flag tells our own
+  // listener to wave the resulting re-dispatch through to the handlers below.
+  const applySelection = (files) => {
+    const transfer = new DataTransfer();
+    files.forEach((file) => transfer.items.add(file));
+    setFieldSelection(field, files);
+    field.dataset.compressionPass = "done";
+    field.files = transfer.files;
+  };
+
   field.addEventListener("change", (event) => {
     // Our own re-dispatch — let it straight through to the other listeners.
     if (field.dataset.compressionPass === "done") {
@@ -2912,15 +3198,26 @@ function attachImageCompression(field, wrapper) {
       return;
     }
 
-    const originals = Array.from(field.files || []);
-    if (!originals.length) {
-      status.classList.add("hidden");
+    const kept = getFieldSelection(field);
+    const picked = Array.from(field.files || []);
+
+    // Android's chooser reports an empty selection when the employee backs out
+    // of the camera, which would otherwise wipe the photos already attached.
+    if (!picked.length) {
+      if (!kept.length || !canRebuildFileList()) {
+        status.classList.add("hidden");
+        return;
+      }
+      event.stopImmediatePropagation();
+      applySelection(kept);
+      field.dispatchEvent(new Event("change", { bubbles: true }));
       return;
     }
 
-    // PDFs and office documents can't be re-encoded here, so a selection with
-    // no images at all should behave exactly as it did before.
-    if (!originals.some(isCompressibleImage)) {
+    if (!canRebuildFileList()) {
+      // Nothing we can do safely — let the native selection through untouched
+      // and leave the size check at upload time to report an oversized file.
+      setFieldSelection(field, picked);
       status.classList.add("hidden");
       return;
     }
@@ -2928,17 +3225,24 @@ function attachImageCompression(field, wrapper) {
     event.stopImmediatePropagation();
 
     const selection = (latestSelection += 1);
+    const imageCount = picked.filter(isCompressibleImage).length;
     status.classList.remove("hidden");
-    status.textContent =
-      originals.length > 1 ? `Compressing ${originals.length} images…` : "Compressing image…";
+    // PDFs and office documents can't be re-encoded, so a selection with no
+    // images still passes through here — it just has nothing to compress.
+    status.textContent = imageCount === 0
+      ? "Adding files…"
+      : imageCount > 1
+        ? `Compressing ${imageCount} images…`
+        : "Compressing image…";
 
     (async () => {
       const compressed = [];
       let savedBytes = 0;
 
-      for (const original of originals) {
+      for (const original of picked) {
         let result = original;
         try {
+          // eslint-disable-next-line no-await-in-loop
           result = await compressImageFile(original);
         } catch (error) {
           // An image we can't re-encode still uploads as-is; the size check at
@@ -2949,22 +3253,54 @@ function attachImageCompression(field, wrapper) {
         compressed.push(result);
       }
 
-      if (selection !== latestSelection) {
-        return;
-      }
+      return { compressed, savedBytes };
+    })()
+      .catch(() => null)
+      .then((outcome) => {
+        if (selection !== latestSelection) {
+          return;
+        }
 
-      const transfer = new DataTransfer();
-      compressed.forEach((file) => transfer.items.add(file));
-      field.dataset.compressionPass = "done";
-      field.files = transfer.files;
+        // The change event was stopped above, so an unexpected failure must
+        // still hand the photos back — returning empty-handed here is exactly
+        // the silent loss this guard exists to prevent.
+        const { compressed, savedBytes } = outcome || { compressed: picked, savedBytes: 0 };
 
-      status.textContent =
-        savedBytes > 0
-          ? `Compressed for upload — saved ${formatFileSize(savedBytes)}.`
-          : "Ready to upload — no compression needed.";
+        // Re-picking the same file (or tapping the field twice) shouldn't
+        // attach it twice, so merge on identity rather than appending blindly.
+        const seen = new Set(kept.map(fileIdentity));
+        const added = compressed.filter((file) => {
+          const identity = fileIdentity(file);
+          if (seen.has(identity)) {
+            return false;
+          }
+          seen.add(identity);
+          return true;
+        });
 
-      field.dispatchEvent(new Event("change", { bubbles: true }));
-    })();
+        const merged = [...kept, ...added];
+        const dropped = Math.max(0, merged.length - MAX_CHECKLIST_FILES);
+
+        try {
+          applySelection(merged.slice(0, MAX_CHECKLIST_FILES));
+        } catch (error) {
+          delete field.dataset.compressionPass;
+          status.textContent = "Could not attach those files — please pick them again.";
+          return;
+        }
+
+        if (dropped > 0) {
+          status.textContent = `Only ${MAX_CHECKLIST_FILES} files can be attached — ${dropped} left out.`;
+        } else if (!outcome) {
+          status.textContent = "Attached without compression — a very large photo may still be refused.";
+        } else if (savedBytes > 0) {
+          status.textContent = `Compressed for upload — saved ${formatFileSize(savedBytes)}.`;
+        } else {
+          status.textContent = "Ready to upload — no compression needed.";
+        }
+
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+      });
   });
 }
 
@@ -3018,6 +3354,9 @@ function attachRemovableFileList(field, wrapper) {
         const dataTransfer = new DataTransfer();
         remaining.forEach((remainingFile) => dataTransfer.items.add(remainingFile));
         field.files = dataTransfer.files;
+        // Keep the accepted selection in step, or a removed file would come
+        // straight back the next time a photo is added to this field.
+        setFieldSelection(field, remaining);
         renderList();
       });
       actions.append(removeButton);
@@ -3053,7 +3392,9 @@ function attachOcrAutofill(fileInput, numberField, wrapper, unitHint) {
   wrapper.append(status);
 
   fileInput.addEventListener("change", async () => {
-    const file = fileInput.files[0];
+    // The selection accumulates now, so the reading is taken from the photo
+    // just added rather than the oldest one still attached.
+    const file = fileInput.files[fileInput.files.length - 1];
     if (!file) {
       status.classList.add("hidden");
       return;
@@ -3147,9 +3488,12 @@ function renderChecklistFields(template) {
         field.multiple = true;
         field.accept = "image/*,.pdf,.doc,.docx,.xlsx,.csv";
       }
+      // No `capture` attribute: on Android Chrome it opens the camera directly
+      // and quietly disables `multiple`, so the employee could neither attach a
+      // shot already in the gallery — which the hint explicitly offers — nor
+      // add a second one. Without it the chooser still lists the camera.
       if (question.type === "photo") {
         field.accept = "image/*";
-        field.setAttribute("capture", "environment");
         field.multiple = true;
       }
     }
@@ -3754,8 +4098,28 @@ function createTableRow(user) {
     <td>${escapeHtml(normalizeValue(user.designation))}</td>
     <td>${escapeHtml(normalizeValue(user.code))}</td>
     <td><span class="day-pill">${escapeHtml(normalizeValue(user.dayOff))}</span></td>
+    <td>${createUserStatusCell(user)}</td>
   `;
   return row;
+}
+
+
+// The switch is the whole point of the column, so the label doubles as the
+// control rather than sitting next to a separate button.
+function createUserStatusCell(user) {
+  const active = isActiveUser(user);
+  const label = active ? "Active" : "Inactive";
+  const next = active ? "Deactivate" : "Activate";
+  return `
+    <div class="user-status-cell">
+      <span class="status-badge ${active ? "" : "status-badge--alert"}">${escapeHtml(label)}</span>
+      ${
+        canManageUsers(state.activeUser)
+          ? `<button type="button" class="edit-task-button" data-toggle-user-active="${escapeHtml(user.email || user.name)}">${escapeHtml(next)}</button>`
+          : ""
+      }
+    </div>
+  `;
 }
 
 
@@ -3769,6 +4133,7 @@ function createMobileCard(user) {
     <div class="mobile-card__meta">Designation: ${escapeHtml(normalizeValue(user.designation))}</div>
     <div class="mobile-card__meta">Salesman Code: ${escapeHtml(normalizeValue(user.code))}</div>
     <div class="mobile-card__meta">Day Off: ${escapeHtml(normalizeValue(user.dayOff))}</div>
+    <div class="mobile-card__meta">${createUserStatusCell(user)}</div>
   `;
   return card;
 }
@@ -3833,6 +4198,15 @@ function createAdminTaskCard(group) {
         <div class="task-kpi">
           <span>Active until</span>
           <strong>${escapeHtml(formatDateValue(group.activeUntil))}</strong>
+        </div>
+        <div class="task-kpi task-kpi--control">
+          <span>Followed up by</span>
+          <select
+            class="pc-assignment-select"
+            data-pc-assignment
+            data-employee-key="${escapeHtml(group.employeeKey)}"
+            aria-label="PC following up ${escapeHtml(group.assigneeName)}"
+          >${buildPcAssignmentOptions(group.employeeKey)}</select>
         </div>
       </div>
     </summary>
@@ -3914,13 +4288,18 @@ function createEmployeeTaskRow(task) {
   }
 
   const isFuelRequest = isFuelRequestTask(task);
-  const fuelApproved = isFuelRequest && completion?.fuelRequestApprovalStatus === "approved";
-  const displayTitle = fuelApproved ? "Fuel checklist" : getTaskDisplayTitle(task);
+  const fuelApproved = isFuelRequest && isFuelRequestApproved(completion);
+  // Approved but not yet filled in: the row has already renamed itself to the
+  // checklist, so it needs a way into it rather than a badge saying done.
+  const fuelChecklistDue = fuelApproved && !completion?.fuelChecklistSubmittedAt;
+  const displayTitle = getMonitorTaskDisplayTitle(task, completion);
 
   let actionCell;
   if (isFuelRequest) {
     if (!completion) {
       actionCell = `<button type="button" class="status-button" data-request-fuel-task="true" data-task-key="${escapeHtml(getTaskOccurrenceIdentity(task))}">Request</button>`;
+    } else if (fuelChecklistDue) {
+      actionCell = `<button type="button" class="status-button" data-complete-task="true" data-task-key="${escapeHtml(getTaskOccurrenceIdentity(task))}">Fill checklist</button>`;
     } else if (fuelApproved) {
       actionCell = createCompletionStatusBadge(completion);
     } else {

@@ -472,6 +472,14 @@ function isVehicleRequestOpen(entry) {
 }
 
 
+// Every one of the 95 existing accounts predates this flag, so only an
+// explicit false counts as inactive — nobody vanishes from a board because
+// their record was written before the switch existed.
+function isActiveUser(user) {
+  return user?.active !== false;
+}
+
+
 function isPcMonitorUser(user) {
   const role = normalizeValue(user?.role).toLowerCase();
   const designation = normalizeValue(user?.designation).toLowerCase();
@@ -787,29 +795,39 @@ async function compressImageFile(file, options = {}) {
 
   // Quality alone can't always reach the target for a very large photo, so
   // each pass that falls short redraws at 70% of the previous size.
-  for (let pass = 0; pass < 3 && !(best && best.size <= targetBytes); pass += 1) {
+  for (let pass = 0; pass < 4 && !(best && best.size <= targetBytes); pass += 1) {
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(height * scale));
 
+    // A canvas this large can fail to allocate on a low-memory phone, and a
+    // draw or encode can throw with it. Falling through to the next, smaller
+    // pass beats throwing the compression away and uploading the multi-megabyte
+    // original, which is what the employee sees as a 3 MB error at submit time.
     const context = canvas.getContext("2d");
-    // JPEG has no alpha channel — flatten onto white so transparent PNG
-    // screenshots don't turn into black rectangles.
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    if (context) {
+      try {
+        // JPEG has no alpha channel — flatten onto white so transparent PNG
+        // screenshots don't turn into black rectangles.
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(source, 0, 0, canvas.width, canvas.height);
 
-    for (const quality of IMAGE_COMPRESSION_QUALITY_STEPS) {
-      // eslint-disable-next-line no-await-in-loop
-      const blob = await canvasToBlob(canvas, "image/jpeg", quality);
-      if (!blob) {
-        break;
-      }
-      if (!best || blob.size < best.size) {
-        best = blob;
-      }
-      if (blob.size <= targetBytes) {
-        break;
+        for (const quality of IMAGE_COMPRESSION_QUALITY_STEPS) {
+          // eslint-disable-next-line no-await-in-loop
+          const blob = await canvasToBlob(canvas, "image/jpeg", quality);
+          if (!blob) {
+            break;
+          }
+          if (!best || blob.size < best.size) {
+            best = blob;
+          }
+          if (blob.size <= targetBytes) {
+            break;
+          }
+        }
+      } catch (error) {
+        // Retry at 70% below rather than abandoning the whole compression.
       }
     }
 

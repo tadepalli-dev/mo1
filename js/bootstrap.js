@@ -48,6 +48,11 @@ function bindEvents() {
   elements.addUserForm.addEventListener("submit", handleAddUser);
   elements.toggleAddUserForm.addEventListener("click", handleToggleAddUserForm);
   elements.pantryAlertsToggle.addEventListener("click", handlePantryAlertsToggle);
+  elements.pcAssignmentsToggle?.addEventListener("click", handlePcAssignmentsToggle);
+  elements.pcAssignmentsSearch?.addEventListener("input", handlePcAssignmentsSearch);
+  elements.pcAssignmentsTableBody?.addEventListener("change", handlePcAssignmentChange);
+  elements.adminTaskBoard?.addEventListener("change", handlePcAssignmentChange);
+  elements.adminTaskBoard?.addEventListener("click", handlePcAssignmentSelectClick);
   elements.searchInput.addEventListener("input", handleDirectorySearch);
   elements.contactsSearchInput.addEventListener("input", handleContactsSearch);
   elements.roleFilter.addEventListener("change", handleRoleFilterChange);
@@ -57,6 +62,10 @@ function bindEvents() {
   elements.departmentSelect.addEventListener("change", handleEmployeeTaskFilterChange);
   elements.homeSearchInput.addEventListener("input", handleHomeSearch);
   elements.dashboardDateInput.addEventListener("change", handleAdminDateChange);
+  elements.adminPcFilter?.addEventListener("change", handleAdminPcFilterChange);
+  elements.userStatusFilter?.addEventListener("change", handleUserStatusFilterChange);
+  elements.userTableBody?.addEventListener("click", handleToggleUserActive);
+  elements.mobileCards?.addEventListener("click", handleToggleUserActive);
   elements.pcMonitorDateInput?.addEventListener("change", handlePcMonitorDateChange);
   elements.pcMonitorTabNav?.addEventListener("click", handlePcMonitorTabClick);
   elements.pcDashboardPanel?.addEventListener("submit", handlePcFollowUpSubmit);
