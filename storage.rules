@@ -1,0 +1,12 @@
+rules_version = '2';
+
+// Checklist attachments are served only through /api/checklist-attachment,
+// which checks the session or the link signature before streaming the file.
+// Direct client access is denied; the Admin SDK bypasses these rules.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

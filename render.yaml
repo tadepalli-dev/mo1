@@ -1,0 +1,75 @@
+# Render blueprint for the MoTrack API.
+#
+# Only the API runs here; the static pages are served by Firebase Hosting and
+# call this service cross-origin. Values marked `sync: false` are secrets and
+# are entered in the Render dashboard, never committed.
+
+services:
+  - type: web
+    name: motrack-api
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: node render-server.js
+    envVars:
+      # node:sqlite (the offline fallback behind Firestore) needs Node 22+.
+      - key: NODE_VERSION
+        value: 22.22.0
+
+      # Firebase Admin credential for the chacklist-dashbords Firestore.
+      # Paste the whole service-account key JSON as a single value.
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+
+      # Signing key for the Google Sheets API JWTs. May be the same JSON as
+      # above, or a different account — it only needs access to the sheets.
+      - key: GOOGLE_SHEETS_SERVICE_ACCOUNT
+        sync: false
+
+      # HMAC key behind the signed attachment links written into the sheets.
+      # Changing it invalidates links already in those sheets.
+      - key: ATTACHMENT_SIGNING_SECRET
+        generateValue: true
+
+      # Where attachment links should point: the Firebase Hosting site, not
+      # this API host, because the links are opened by people from the app.
+      - key: APP_BASE_URL
+        value: https://chacklist-dashbords.web.app
+
+      # Attachment storage driver. Cloud Storage for Firebase needs the Blaze
+      # plan on new projects, so this stays on Vercel Blob until the project
+      # is upgraded; then switch to firebase-storage and drop the token below.
+      - key: ATTACHMENT_STORE
+        value: vercel-blob
+      - key: BLOB_READ_WRITE_TOKEN
+        sync: false
+
+  # Pulls assignments from the main Firebase project without changing it,
+  # writes only to chacklist-dashbords, then refreshes the Google Sheet.
+  - type: cron
+    name: checklist-walkin-sync
+    runtime: node
+    schedule: "*/5 * * * *"
+    buildCommand: npm install
+    startCommand: npm run sync:checklist-destination
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.0
+
+      # Main Firebase app: the credential must have Firestore read access
+      # only. The sync never sends a write through this credential.
+      - key: SOURCE_FIREBASE_SERVICE_ACCOUNT
+        sync: false
+
+      # Checklist-dashboard Firebase app: all task and dashboard writes land
+      # here, never in the main Firebase app.
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+
+      # Google Sheet destination. Its service account needs Editor access to
+      # this spreadsheet only.
+      - key: GOOGLE_SHEETS_SERVICE_ACCOUNT
+        sync: false
+      - key: GOOGLE_SHEETS_SPREADSHEET_ID
+        sync: false

@@ -30,6 +30,17 @@ function getApiBaseUrl() {
     return override.trim().replace(/\/+$/, "");
   }
 
+  // Set by js/config.js, which only the Firebase Hosting build emits. That
+  // deployment serves the static files from the Firebase domain while the API
+  // runs on a separate host, so the two are not same-origin and a relative ""
+  // base would resolve against the Hosting domain, which has no /api routes.
+  // Deployments that serve their own API (Vercel) never define it and so keep
+  // the relative base.
+  const configured = typeof window.MOTRACK_API_BASE === "string" ? window.MOTRACK_API_BASE.trim() : "";
+  if (configured) {
+    return configured.replace(/[/]+$/, "");
+  }
+
   return "";
 }
 

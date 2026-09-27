@@ -16,12 +16,21 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { DatabaseSync } = require("node:sqlite");
+const admin = require("firebase-admin");
+const { getFirestore } = require("firebase-admin/firestore");
+const firestoreStore = require("../lib/firestore-store");
 
 const ROOT = path.join(__dirname, "..");
 const CONFIG_PATH = path.join(ROOT, "sheets-config.json");
 const SHEETS_API_SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+const FIRESTORE_STORE_COLLECTION = "motrack_store";
+const EXPORTED_STORE_KEYS = ["users", "tasks", "completions", "absences", "pantryAlerts"];
 
 function loadConfig() {
+  const spreadsheetId = String(process.env.GOOGLE_SHEETS_SPREADSHEET_ID || "").trim();
+  if (spreadsheetId) {
+    return { spreadsheetId, serviceAccountKeyPath: null };
+  }
   if (!fs.existsSync(CONFIG_PATH)) {
     console.error(
       `Missing ${CONFIG_PATH}.\n` +
@@ -33,6 +42,17 @@ function loadConfig() {
 }
 
 function loadServiceAccount(config) {
+  const fromEnvironment = String(process.env.GOOGLE_SHEETS_SERVICE_ACCOUNT || "").trim();
+  if (fromEnvironment) {
+    try {
+      return JSON.parse(fromEnvironment);
+    } catch (error) {
+      throw new Error(`GOOGLE_SHEETS_SERVICE_ACCOUNT is not valid JSON: ${error.message}`);
+    }
+  }
+  if (!config.serviceAccountKeyPath) {
+    throw new Error("Set GOOGLE_SHEETS_SERVICE_ACCOUNT when GOOGLE_SHEETS_SPREADSHEET_ID is used.");
+  }
   const keyPath = path.resolve(ROOT, config.serviceAccountKeyPath);
   if (!fs.existsSync(keyPath)) {
     console.error(`Service account key file not found at: ${keyPath}`);
@@ -109,6 +129,37 @@ function readStore() {
   return result;
 }
 
+function readTargetServiceAccount() {
+  const raw = String(
+    process.env.CHECKLIST_FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT || ""
+  ).trim();
+  if (!raw) {
+    throw new Error(
+      "Missing CHECKLIST_FIREBASE_SERVICE_ACCOUNT or FIREBASE_SERVICE_ACCOUNT for the checklist-dashboard Firestore project."
+    );
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`Checklist Firebase credential is not valid JSON: ${error.message}`);
+  }
+}
+
+async function readStoreFromFirestore() {
+  const app = admin.initializeApp(
+    { credential: admin.cert(readTargetServiceAccount()) },
+    "checklist-sheets-export"
+  );
+  const firestore = getFirestore(app);
+  const entries = await Promise.all(
+    EXPORTED_STORE_KEYS.map(async (key) => [
+      key,
+      await firestoreStore.readStoreValue(firestore, FIRESTORE_STORE_COLLECTION, key, key === "completions" ? {} : []),
+    ])
+  );
+  return Object.fromEntries(entries);
+}
+
 // Converts an array of (possibly differently-shaped) plain objects into a
 // header row + data rows, using the union of all keys seen. Nested
 // objects/arrays are stringified so they still fit in a single cell.
@@ -129,6 +180,39 @@ function objectsToRows(items) {
     })
   );
   return [headers, ...rows];
+}
+
+// The checklist creates one task per standard checklist item, but the Sheet
+// needs one clear handover row per customer.  Group those task copies by the
+// immutable walk-in ID while retaining the assigned salesperson and customer
+// details that came from the main Firebase project.
+function buildWalkinAssignmentRows(tasks) {
+  const assignments = new Map();
+  tasks
+    .filter((task) => task && task.source === "walkin")
+    .forEach((task) => {
+      const walkinId = String(task.walkinId || task.customerAttributionKey || task.taskId || task.id || "").trim();
+      if (!walkinId) {
+        return;
+      }
+      const existing = assignments.get(walkinId);
+      if (existing) {
+        existing.checklistTaskCount += 1;
+        return;
+      }
+      assignments.set(walkinId, {
+        walkinId,
+        customerName: task.customerName || task.customerAttributionName || "",
+        assignedSalesperson: task.assigneeName || "",
+        assignedSalespersonEmail: task.assigneeEmail || "",
+        department: task.department || "",
+        details: task.details || "",
+        assignedAt: task.createdAt || "",
+        plannedDate: task.plannedDate || task.walkinDate || "",
+        checklistTaskCount: 1,
+      });
+    });
+  return [...assignments.values()];
 }
 
 async function getSpreadsheetMeta(token, spreadsheetId) {
@@ -185,7 +269,10 @@ async function writeTab(token, spreadsheetId, title, rows) {
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
-  const store = readStore();
+  // Render's scheduled job has no persistent local SQLite file.  Reading the
+  // checklist Firestore destination keeps Sheets in sync with the same data
+  // the hosted dashboard uses.  The original local mode remains available.
+  const store = process.argv.includes("--from-firestore") ? await readStoreFromFirestore() : readStore();
 
   // Never export passwords into the Sheet — it may end up shared more
   // broadly (e.g. as a Looker Studio data source) than the app itself.
@@ -196,6 +283,7 @@ async function main() {
   // carry customer/walk-in fields that don't apply to a plain employee task
   // — keep this tab to genuinely assigned employee tasks only.
   const employeeTasks = store.tasks.filter((task) => task.source !== "walkin");
+  const walkinAssignments = buildWalkinAssignmentRows(store.tasks);
 
   // state.pantryAlerts is unshift()'d in the app (newest submission first),
   // which reads backwards for a report meant to be read top-to-bottom —
@@ -207,6 +295,7 @@ async function main() {
 
   const tabs = {
     Tasks: objectsToRows(employeeTasks),
+    "Walk-in Assignments": objectsToRows(walkinAssignments),
     Completions: objectsToRows(
       Object.entries(store.completions).map(([key, value]) => ({ completionKey: key, ...value }))
     ),

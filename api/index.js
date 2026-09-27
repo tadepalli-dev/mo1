@@ -1,11 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { DatabaseSync } = require("node:sqlite");
-const { Readable } = require("node:stream");
 const admin = require("firebase-admin");
 const { getFirestore } = require("firebase-admin/firestore");
-const { get, put } = require("@vercel/blob");
+const { putAttachment, getAttachment, attachmentSigningSecret } = require("../lib/attachment-store");
 const { rewriteSubmittedTaskDetailsSheet } = require("../lib/submitted-task-details-export");
 const {
   CHECKLIST_ATTACHMENT_PREFIX,
@@ -23,6 +21,7 @@ const {
 } = require("../lib/vehicle-sheet-directory");
 const { appendClientFormSubmissionRow } = require("../lib/client-form-sheet-export");
 const firestoreStore = require("../lib/firestore-store");
+const { readFirebaseServiceAccount } = require("../lib/service-account");
 
 const ROOT = process.cwd();
 const BUNDLED_DATA_DIR = path.join(ROOT, "data");
@@ -72,6 +71,7 @@ let db = null;
 let getStoreStatement = null;
 let setStoreStatement = null;
 let leaveCache = { data: null, fetchedAt: 0, error: null };
+let sqliteUnavailable = false;
 let firestore = null;
 
 function withTimeout(promise, timeoutMs, label) {
@@ -188,8 +188,26 @@ function ensureTmpData() {
   }
 }
 
+// On Cloud Functions / Cloud Run there is no key file: the runtime supplies
+// Application Default Credentials instead, and the service account is the
+// one attached to the function. Keying off the file alone therefore left
+// Firestore switched off for the entire Firebase deploy, silently serving
+// STORE_DEFAULTS. K_SERVICE is set by Cloud Run (which Functions v2 runs on)
+// and FUNCTION_TARGET by the Functions framework.
+function hasApplicationDefaultCredentials() {
+  return Boolean(
+    process.env.K_SERVICE ||
+      process.env.FUNCTION_TARGET ||
+      process.env.GOOGLE_APPLICATION_CREDENTIALS
+  );
+}
+
 function canUseFirestoreStore() {
-  return fs.existsSync(SERVICE_ACCOUNT_PATH);
+  return (
+    Boolean(process.env.FIREBASE_SERVICE_ACCOUNT) ||
+    fs.existsSync(SERVICE_ACCOUNT_PATH) ||
+    hasApplicationDefaultCredentials()
+  );
 }
 
 function getFirestoreDb() {
@@ -202,7 +220,11 @@ function getFirestoreDb() {
   }
 
   try {
-    const serviceAccount = require(SERVICE_ACCOUNT_PATH);
+    // FIREBASE_SERVICE_ACCOUNT first: a container host such as Render has
+    // neither the key file nor ambient credentials, and on Cloud Functions
+    // both this and the file are absent so initializeApp() falls through to
+    // Application Default Credentials.
+    const serviceAccount = readFirebaseServiceAccount(ROOT);
     // Not admin.apps.length — this firebase-admin version doesn't expose
     // .apps as a property (only the getApps() function), so that check
     // throws instead of ever returning false, silently falling through to
@@ -210,7 +232,9 @@ function getFirestoreDb() {
     // this process's life. That's why production has been serving a frozen
     // snapshot from the last deploy instead of live data.
     if (!admin.getApps().length) {
-      admin.initializeApp({ credential: admin.cert(serviceAccount) });
+      // No explicit credential on Firebase — initializeApp() with no
+      // argument picks up the ambient service account and project.
+      admin.initializeApp(serviceAccount ? { credential: admin.cert(serviceAccount) } : undefined);
     }
     firestore = getFirestore();
   } catch (error) {
@@ -220,13 +244,45 @@ function getFirestoreDb() {
   return firestore;
 }
 
+// node:sqlite is still flagged experimental and is only ever the fallback
+// behind Firestore, so a runtime without it must degrade rather than crash
+// the whole handler. Required lazily for the same reason: on Cloud Functions
+// the module may be unavailable, and the import alone would kill every
+// request including the ones Firestore could have served on its own.
+function loadDatabaseSync() {
+  if (sqliteUnavailable) {
+    return null;
+  }
+  try {
+    return require("node:sqlite").DatabaseSync;
+  } catch (error) {
+    console.error("node:sqlite unavailable — running Firestore-only, no local fallback.", error);
+    sqliteUnavailable = true;
+    return null;
+  }
+}
+
+// Returns null when there is no usable SQLite fallback; every caller treats
+// that as "no cached copy" rather than as an error.
 function openDb() {
   if (db) {
     return db;
   }
 
-  ensureTmpData();
-  db = new DatabaseSync(TMP_DB_PATH);
+  const DatabaseSync = loadDatabaseSync();
+  if (!DatabaseSync) {
+    return null;
+  }
+
+  try {
+    ensureTmpData();
+    db = new DatabaseSync(TMP_DB_PATH);
+  } catch (error) {
+    console.error("Could not open the SQLite fallback — running Firestore-only.", error);
+    sqliteUnavailable = true;
+    db = null;
+    return null;
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS kv_store (
       key TEXT PRIMARY KEY,
@@ -243,7 +299,9 @@ function openDb() {
 }
 
 function readStoreValue(key) {
-  openDb();
+  if (!openDb()) {
+    return STORE_DEFAULTS[key];
+  }
   const row = getStoreStatement.get(key);
   if (!row) {
     return STORE_DEFAULTS[key];
@@ -257,7 +315,9 @@ function readStoreValue(key) {
 }
 
 function writeStoreValue(key, value) {
-  openDb();
+  if (!openDb()) {
+    return;
+  }
   setStoreStatement.run(key, JSON.stringify(value), new Date().toISOString());
 }
 
@@ -475,7 +535,27 @@ function getBearerToken(request) {
   return match ? match[1].trim() : null;
 }
 
+// Cloud Functions runs an Express body parser ahead of this handler and that
+// consumes the request stream, so on Firebase the "end" event below never
+// fires and every POST hangs until the function times out. Vercel does no
+// such parsing. Both platforms are served by preferring whatever the runtime
+// already parsed and keeping the stream read as the fallback.
 function parseJsonBody(request) {
+  if (request.rawBody) {
+    const raw = Buffer.isBuffer(request.rawBody) ? request.rawBody.toString("utf8") : String(request.rawBody);
+    return Promise.resolve(raw ? JSON.parse(raw) : {});
+  }
+  if (Buffer.isBuffer(request.body)) {
+    const raw = request.body.toString("utf8");
+    return Promise.resolve(raw ? JSON.parse(raw) : {});
+  }
+  if (typeof request.body === "string") {
+    return Promise.resolve(request.body ? JSON.parse(request.body) : {});
+  }
+  if (request.body && typeof request.body === "object") {
+    return Promise.resolve(request.body);
+  }
+
   return new Promise((resolve, reject) => {
     const chunks = [];
     request.on("data", (chunk) => {
@@ -519,8 +599,7 @@ async function handleChecklistAttachmentUpload(request, response) {
   }
 
   const userFolder = safeAttachmentName(getSessionEmailFromToken(getBearerToken(request)) || "employee");
-  const blob = await put(`${CHECKLIST_ATTACHMENT_PREFIX}${userFolder}/${Date.now()}-${safeAttachmentName(payload.name)}`, fileBuffer, {
-    access: "private",
+  const blob = await putAttachment(`${CHECKLIST_ATTACHMENT_PREFIX}${userFolder}/${Date.now()}-${safeAttachmentName(payload.name)}`, fileBuffer, {
     addRandomSuffix: true,
     contentType: safeAttachmentMimeType(payload.type),
   });
@@ -535,7 +614,7 @@ async function handleChecklistAttachmentUpload(request, response) {
 }
 
 async function handleChecklistAttachmentDownload(request, response, pathname, signature) {
-  const hasSignedSheetLink = hasValidAttachmentSignature(pathname, signature, process.env.BLOB_READ_WRITE_TOKEN);
+  const hasSignedSheetLink = hasValidAttachmentSignature(pathname, signature, attachmentSigningSecret());
   if (!isAuthorized(request) && !hasSignedSheetLink) {
     sendJson(response, 401, { ok: false, error: "Unauthorized. Please sign in again." });
     return;
@@ -545,18 +624,18 @@ async function handleChecklistAttachmentDownload(request, response, pathname, si
     return;
   }
 
-  const result = await get(pathname, { access: "private" });
-  if (!result || result.statusCode !== 200 || !result.stream) {
+  const result = await getAttachment(pathname);
+  if (!result) {
     sendJson(response, 404, { ok: false, error: "Attachment not found." });
     return;
   }
 
   response.status(200);
-  response.setHeader("Content-Type", result.blob.contentType || "application/octet-stream");
+  response.setHeader("Content-Type", result.contentType || "application/octet-stream");
   response.setHeader("Content-Disposition", "inline");
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("Cache-Control", "private, no-store");
-  Readable.fromWeb(result.stream).pipe(response);
+  result.stream.pipe(response);
 }
 
 function sendJson(response, statusCode, payload) {
@@ -1394,7 +1473,7 @@ async function handler(request, response) {
         ]);
         const rows = buildSubmissionAuditRows(tasks, completions);
         const attachmentUrlBuilder = (attachmentPath) =>
-          buildChecklistAttachmentUrl(attachmentPath, process.env.BLOB_READ_WRITE_TOKEN);
+          buildChecklistAttachmentUrl(attachmentPath, attachmentSigningSecret());
         const [reportResult, detailsResult] = await Promise.all([
           rewriteSubmissionReport(ROOT, rows),
           rewriteSubmittedTaskDetailsSheet(ROOT, { tasks, completions, users }, { attachmentUrlBuilder }),

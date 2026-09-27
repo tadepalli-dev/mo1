@@ -727,7 +727,7 @@
     submitButton.disabled = true;
     submitButton.textContent = 'Submitting…';
 
-    fetch('/api/client-form-submissions', {
+    fetch((window.MOTRACK_API_BASE || '') + '/api/client-form-submissions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(collectFormData()),

@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "node --env-file-if-exists=.env server.js",
     "start": "node --env-file-if-exists=.env server.js",
-    "sync-sheets": "node scripts/sync-to-sheets.js"
+    "sync-sheets": "node scripts/sync-to-sheets.js",
+    "sync:checklist-destination": "node scripts/refresh-checklist-destination.js",
+    "build:firebase": "node scripts/build-firebase.js"
   },
   "dependencies": {
     "@vercel/blob": "^2.3.0",
+    "firebase": "^12.19.0",
     "firebase-admin": "^14.2.0"
   }
 }

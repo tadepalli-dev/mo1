@@ -12,6 +12,7 @@
 //   node scripts/sync-walkins.js            # writes new tasks
 //   node scripts/sync-walkins.js --dry-run  # only prints what it would do
 
+const fs = require("fs");
 const path = require("path");
 const { DatabaseSync } = require("node:sqlite");
 const admin = require("firebase-admin");
@@ -21,7 +22,17 @@ const firestoreStore = require("../lib/firestore-store");
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const DB_PATH = path.join(__dirname, "..", "data", "motrack.db");
-const SERVICE_ACCOUNT_PATH = path.join(__dirname, "..", "service-account-key.json");
+// The checked-in local key is for the main walk-in project.  It is used only
+// to read assignments during a local run.  Production supplies this same
+// credential through SOURCE_FIREBASE_SERVICE_ACCOUNT instead.
+const SOURCE_SERVICE_ACCOUNT_PATH = path.join(__dirname, "..", "service-account-key.json");
+const SOURCE_SERVICE_ACCOUNT_ENV = "SOURCE_FIREBASE_SERVICE_ACCOUNT";
+// Never fall back to the source key for this one: doing so would write the
+// checklist state back into the main Firebase project.
+const DESTINATION_SERVICE_ACCOUNT_ENVS = [
+  "CHECKLIST_FIREBASE_SERVICE_ACCOUNT",
+  "FIREBASE_SERVICE_ACCOUNT",
+];
 // The hosted app (api/index.js) reads and writes its state here. This script
 // used to write only to the local SQLite file, which the deployed app can
 // only see through a fresh git commit + redeploy — so walk-ins handed over
@@ -61,6 +72,44 @@ function todayValue() {
   return new Date(now - offset).toISOString().slice(0, 10);
 }
 
+function parseServiceAccount(raw, variableName) {
+  try {
+    const account = JSON.parse(raw);
+    if (!account.project_id || !account.client_email || !account.private_key) {
+      throw new Error("missing project_id, client_email, or private_key");
+    }
+    return account;
+  } catch (error) {
+    throw new Error(`${variableName} must contain a complete Firebase service-account JSON value: ${error.message}`);
+  }
+}
+
+function readSourceServiceAccount() {
+  const fromEnvironment = String(process.env[SOURCE_SERVICE_ACCOUNT_ENV] || "").trim();
+  if (fromEnvironment) {
+    return parseServiceAccount(fromEnvironment, SOURCE_SERVICE_ACCOUNT_ENV);
+  }
+  if (!fs.existsSync(SOURCE_SERVICE_ACCOUNT_PATH)) {
+    throw new Error(
+      `Missing ${SOURCE_SERVICE_ACCOUNT_ENV}. For a local run, place the read-only main-project key at ${SOURCE_SERVICE_ACCOUNT_PATH}.`
+    );
+  }
+  return require(SOURCE_SERVICE_ACCOUNT_PATH);
+}
+
+function readDestinationServiceAccount() {
+  for (const variableName of DESTINATION_SERVICE_ACCOUNT_ENVS) {
+    const raw = String(process.env[variableName] || "").trim();
+    if (raw) {
+      return parseServiceAccount(raw, variableName);
+    }
+  }
+  throw new Error(
+    `Missing ${DESTINATION_SERVICE_ACCOUNT_ENVS.join(" or ")}. ` +
+      "This must be the service-account key for the chacklist-dashbords project, never the main Firebase project."
+  );
+}
+
 // The CRM's `handedTo`/`handedOverAt` fields exist but are null in practice —
 // `salesmanName`/`assignedAt` are what's actually populated when a walk-in is
 // handed over, so that's the real handover date, not the day this script runs.
@@ -70,10 +119,95 @@ function resolveWalkinDate(data) {
   return /^\d{4}-\d{2}-\d{2}$/.test(sliced) ? sliced : todayValue();
 }
 
+function isActiveSalesman(user) {
+  return (
+    String(user?.role || "").trim().toLowerCase() === "salesman" &&
+    (user?.isActive === true || String(user?.isActive).trim().toLowerCase() === "true")
+  );
+}
+
+function toChecklistSalesman(doc) {
+  const user = doc.data() || {};
+  // Only operational identity fields are copied. Passwords and private HR
+  // information stay exclusively in the main Firebase project.
+  return {
+    source: "motrack-user-sync",
+    sourceUserId: doc.id,
+    name: String(user.name || "").trim(),
+    email: String(user.email || "").trim().toLowerCase(),
+    role: "salesman",
+    active: true,
+    isActive: true,
+    employeeCode: String(user.employeeCode || "").trim(),
+    salesmanCode: String(user.salesmanCode || "").trim(),
+    designation: String(user.designation || "").trim(),
+    department: String(user.department || "").trim(),
+    dayOff: String(user.weekOff || user.dayOff || "").trim(),
+    syncedAt: new Date().toISOString(),
+  };
+}
+
+async function readActiveSalesmen(sourceFirestore) {
+  // Read-only access to the main Firebase app. This script never sends any
+  // write through sourceFirestore.
+  const snapshot = await sourceFirestore.collection("users").where("role", "==", "salesman").get();
+  return snapshot.docs
+    .filter((doc) => isActiveSalesman(doc.data()))
+    .map(toChecklistSalesman)
+    .filter((user) => user.name && user.email);
+}
+
+function mergeSalesmenIntoChecklistUsers(existingUsers, sourceSalesmen) {
+  const next = Array.isArray(existingUsers) ? existingUsers.map((user) => ({ ...user })) : [];
+  const indexByEmail = new Map(
+    next.map((user, index) => [String(user.email || "").trim().toLowerCase(), index]).filter(([email]) => email)
+  );
+  const sourceEmails = new Set(sourceSalesmen.map((user) => user.email));
+
+  sourceSalesmen.forEach((sourceUser) => {
+    const index = indexByEmail.get(sourceUser.email);
+    if (index === undefined) {
+      next.push(sourceUser);
+      indexByEmail.set(sourceUser.email, next.length - 1);
+      return;
+    }
+    const existing = next[index];
+    const password = existing.password;
+    next[index] = { ...existing, ...sourceUser };
+    // A checklist-only password is preserved; no password is read from the
+    // main Firebase app.
+    if (password !== undefined) {
+      next[index].password = password;
+    }
+  });
+
+  // Keep historical task owners, but disable salesmen who have since become
+  // inactive in the main user list.
+  next.forEach((user) => {
+    if (user.source === "motrack-user-sync" && !sourceEmails.has(String(user.email || "").toLowerCase())) {
+      user.active = false;
+      user.isActive = false;
+      user.deactivatedAt = new Date().toISOString();
+    }
+  });
+
+  return next;
+}
+
 async function main() {
-  const serviceAccount = require(SERVICE_ACCOUNT_PATH);
-  admin.initializeApp({ credential: admin.cert(serviceAccount) });
-  const firestore = getFirestore();
+  // Separate named Admin apps make the data direction explicit:
+  // main Firebase (source) is queried only; checklist-dashboard (destination)
+  // receives every write.
+  const sourceApp = admin.initializeApp(
+    { credential: admin.cert(readSourceServiceAccount()) },
+    "walkin-source"
+  );
+  const destinationApp = admin.initializeApp(
+    { credential: admin.cert(readDestinationServiceAccount()) },
+    "checklist-destination"
+  );
+  const sourceFirestore = getFirestore(sourceApp);
+  const destinationFirestore = getFirestore(destinationApp);
 
   const db = new DatabaseSync(DB_PATH);
   const getStore = db.prepare("SELECT value FROM kv_store WHERE key = ?");
@@ -92,7 +226,7 @@ async function main() {
     const localValue = local ? JSON.parse(local.value || "null") : null;
     try {
       const remote = await firestoreStore.readStoreValue(
-        firestore,
+        destinationFirestore,
         FIRESTORE_STORE_COLLECTION,
         key,
         null
@@ -107,8 +241,11 @@ async function main() {
     return localValue ?? fallbackValue;
   };
 
-  const users = await readStore("users", []);
+  const existingUsers = await readStore("users", []);
   const tasks = await readStore("tasks", []);
+  const sourceSalesmen = await readActiveSalesmen(sourceFirestore);
+  const users = mergeSalesmenIntoChecklistUsers(existingUsers, sourceSalesmen);
+  const rosterChanged = JSON.stringify(users) !== JSON.stringify(existingUsers);
 
   const salesmenByNormalizedName = new Map();
   users
@@ -131,7 +268,7 @@ async function main() {
   // be shown.
   const today = todayValue();
 
-  const snapshot = await firestore
+  const snapshot = await sourceFirestore
     .collection("Walkin_Customer")
     .orderBy("assignedAt", "desc")
     .limit(200)
@@ -210,6 +347,7 @@ async function main() {
 
   const assignedCount = snapshot.docs.filter((doc) => doc.data().salesmanName).length;
   console.log(`Recent walk-ins checked: ${snapshot.size} | assigned to a salesman: ${assignedCount}`);
+  console.log(`Active salesmen copied from main Firebase: ${sourceSalesmen.length}`);
   console.log(`Already synced (skipped): ${skippedExisting.length}`, skippedExisting);
   console.log(`Unmatched salesman names: ${unmatched.length}`, unmatched);
   console.log(`Customers with new or missing tasks: ${customersSynced.length} (${newTasks.length} tasks total)`);
@@ -226,7 +364,7 @@ async function main() {
   // hosted app keeps reading the SQLite snapshot frozen at the last deploy
   // and no walk-in ever gets a Customer/Deal ID there.
   const needsFirestoreSeed = missingFromFirestore.has("tasks");
-  if (!newTasks.length && !needsFirestoreSeed) {
+  if (!newTasks.length && !needsFirestoreSeed && !rosterChanged) {
     console.log("\nNothing to write.");
     return;
   }
@@ -240,7 +378,7 @@ async function main() {
   // failure here has to be loud (non-zero exit) instead of leaving the local
   // file ahead of production again.
   const result = await firestoreStore.writeStoreValue(
-    firestore,
+    destinationFirestore,
     FIRESTORE_STORE_COLLECTION,
     "tasks",
     updatedTasks
@@ -256,9 +394,9 @@ async function main() {
   // Tasks are matched to a salesman by assigneeEmail, so the hosted app needs
   // the same roster this script matched against. Seeded only when absent —
   // once Firestore holds it, the hosted dashboard owns it.
-  if (missingFromFirestore.has("users")) {
-    await firestoreStore.writeStoreValue(firestore, FIRESTORE_STORE_COLLECTION, "users", users);
-    console.log(`Seeded "users" in Firestore with ${users.length} user(s).`);
+  if (missingFromFirestore.has("users") || rosterChanged) {
+    await firestoreStore.writeStoreValue(destinationFirestore, FIRESTORE_STORE_COLLECTION, "users", users);
+    console.log(`Synced ${users.length} checklist user record(s) to Firestore.`);
   }
 }
 

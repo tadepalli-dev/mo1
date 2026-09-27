@@ -1,0 +1,4 @@
+{
+  "_comment": "The dashboard is hosted on Firebase while its working API is deployed separately. The browser calls this origin directly with CORS.",
+  "apiBaseUrl": "https://mo1.onrender.com"
+}
