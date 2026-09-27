@@ -17,6 +17,12 @@ services:
       - key: NODE_VERSION
         value: 22.22.0
 
+      # Main MoTrack Firebase Authentication is used only to verify the
+      # password entered by the user. It never writes to the main project.
+      # This is a Firebase browser API key, not a service-account credential.
+      - key: MOTRACK_AUTH_API_KEY
+        value: AIzaSyBUb3wNulHplcgEkuqpv2K5v711K7hxLzo
+
       # Firebase Admin credential for the chacklist-dashbords Firestore.
       # Paste the whole service-account key JSON as a single value.
       - key: FIREBASE_SERVICE_ACCOUNT

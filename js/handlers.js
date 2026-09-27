@@ -300,8 +300,6 @@ async function handleLogin(event) {
 
   setStatusMessage(elements.loginMessage, "Signing in…", "");
 
-  // Temporary login mode: the server currently authenticates by known email
-  // only, then returns a session token for the rest of the app.
   let result;
   try {
     const response = await fetch(buildApiUrl("/api/login"), {
@@ -320,6 +318,9 @@ async function handleLogin(event) {
       not_found: "This email is not in the MoTrack user list.",
       missing_password: "Enter a password to continue.",
       wrong_password: "Password is incorrect for this account.",
+      inactive: "This MoTrack account is inactive.",
+      too_many_attempts: "Too many attempts. Wait a moment, then try again.",
+      auth_unavailable: "MoTrack sign-in is temporarily unavailable. Try again shortly.",
     };
     setStatusMessage(elements.loginMessage, messages[result.reason] || "Could not sign in.", "error");
     return;

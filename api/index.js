@@ -41,6 +41,15 @@ const CLIENT_FORM_SUBMISSIONS_COLLECTION = "client_form_submissions";
 const MAX_CHECKLIST_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 const RETIRED_LOGIN_EMAILS = new Set(["ups021980@gmail.com"]);
 const SITE_VISIT_COUNT = 10;
+// The main MoTrack Firebase project's browser API key. Firebase web API keys
+// identify a project; they are not service-account secrets. Render may
+// override this value through MOTRACK_AUTH_API_KEY if the main project key is
+// rotated. Passwords are sent only to Firebase Authentication for checking;
+// they are never copied into the checklist database.
+const MOTRACK_AUTH_API_KEY = process.env.MOTRACK_AUTH_API_KEY || "AIzaSyBUb3wNulHplcgEkuqpv2K5v711K7hxLzo";
+const MOTRACK_AUTH_SIGN_IN_URL =
+  "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=" +
+  encodeURIComponent(MOTRACK_AUTH_API_KEY);
 
 const STORE_KEYS = ["users", "tasks", "deletedRequiredTasks", "completions", "absences", "pantryAlerts", "liveLocations", "passwordResetRequests", "vehicleChangeRequests", "vehicleAllocations", "checklistFollowUps", "pcAssignments"];
 const STORE_DEFAULTS = {
@@ -830,8 +839,17 @@ async function handleLogin(request, response) {
     sendJson(response, 200, { ok: false, reason: "not_found" });
     return;
   }
-  // Temporary sign-in bypass: any existing email can log in, regardless of
-  // the submitted password, until the user-password migration is fixed.
+
+  if (matchedUser.active === false || matchedUser.isActive === false) {
+    sendJson(response, 200, { ok: false, reason: "inactive" });
+    return;
+  }
+
+  const authentication = await verifyMoTrackPassword(email, password);
+  if (!authentication.ok) {
+    sendJson(response, 200, { ok: false, reason: authentication.reason });
+    return;
+  }
 
   const { password: _omit, ...safeUser } = matchedUser;
   sendJson(response, 200, {
@@ -839,6 +857,50 @@ async function handleLogin(request, response) {
     user: safeUser,
     token: createSessionToken(safeUser.email),
   });
+}
+
+async function verifyMoTrackPassword(email, password) {
+  if (!password) {
+    return { ok: false, reason: "missing_password" };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    // This verifies the user's existing main-app credential directly with
+    // Firebase Authentication. The checklist service receives only the
+    // yes/no result and does not store, log, or forward the password.
+    const firebaseResponse = await fetch(MOTRACK_AUTH_SIGN_IN_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+      signal: controller.signal,
+    });
+    const body = await firebaseResponse.json().catch(() => ({}));
+
+    if (firebaseResponse.ok && body.idToken) {
+      return { ok: true };
+    }
+
+    const code = String(body?.error?.message || "").toUpperCase();
+    if (["EMAIL_NOT_FOUND", "INVALID_PASSWORD", "INVALID_LOGIN_CREDENTIALS"].includes(code)) {
+      return { ok: false, reason: "wrong_password" };
+    }
+    if (code === "USER_DISABLED") {
+      return { ok: false, reason: "inactive" };
+    }
+    if (code === "TOO_MANY_ATTEMPTS_TRY_LATER") {
+      return { ok: false, reason: "too_many_attempts" };
+    }
+
+    console.error("MoTrack Firebase Authentication rejected the login:", code || firebaseResponse.status);
+    return { ok: false, reason: "auth_unavailable" };
+  } catch (error) {
+    console.error("MoTrack Firebase Authentication could not be reached:", error.message);
+    return { ok: false, reason: "auth_unavailable" };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // Public (no session token) since the person submitting this hasn't logged
